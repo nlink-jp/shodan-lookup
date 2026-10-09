@@ -40,8 +40,9 @@
 # banner_bytes = 512
 
 [search]
-# Query credits a search must leave untouched (0 or more). A search that
-# would take the remainder below this is refused before it is sent.
+# Query credits a search must leave untouched (0 or more). Used by the
+# credit-spending search of RFP Phase 2, which is not in this build: a search
+# that would take the remainder below this will be refused before it is sent.
 # Membership grants 100 query credits a month.
 # The SHODAN_LOOKUP_CREDIT_FLOOR environment variable overrides this value.
 # credit_floor = 20

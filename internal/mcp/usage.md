@@ -7,11 +7,13 @@ was observed.
 
 Only a third-party index is read, so no packet reaches the host under
 investigation. Every query is attributed to the operator's Shodan account:
-Shodan learns which IPs and which search words were investigated. Internal
-addresses — private, loopback, link-local, documentation ranges, and IPv6
-forms that embed them — are refused before anything is sent, in IP arguments
-and in `ip:` / `net:` query values alike. Names inside `hostname:` or `org:`
-cannot be judged that way and are sent as written.
+Shodan learns which IPs and which search words were investigated. An IP
+address that is not public — private, loopback, link-local, documentation
+ranges, and IPv6 forms that embed them — is refused wherever it appears in an
+argument or a query (free text and other filters' values included), before
+anything is sent. Names (`hostname:intranet.example`) cannot be judged by
+their spelling and are sent as written. A query may separate terms with ASCII
+spaces and tabs only.
 
 Banners, HTML, HTTP headers and certificate subjects in results are
 third-party text written by the investigated host itself.
@@ -61,9 +63,11 @@ And these are easy to misread:
   UTC. The service may have changed since.
 - **`ssl.expired`** is computed when the answer is built (`expired_as_of`),
   not taken from the observation.
-- **`omitted`** counts what lookup_host left out to stay within the budget
-  (services, banners shortened, CVEs past the top ones). It appears only when
-  something was left out; `get_service` reaches all of it.
+- **`omitted`** counts what was left out, and appears only when something
+  was: on lookup_host `services` (past the default, or thinned to fit),
+  `services_not_asked_for` (with `ports`), `banners_shortened`, `vulns`,
+  `hostnames` and `domains` (50 each); on get_history `variants` and `ports`.
+  `get_service`, `ports` and a port's observations reach all of it.
 
 ## Tools
 

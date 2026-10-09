@@ -44,8 +44,11 @@ Go 1.25+. **No external dependencies — standard library only.**
   `base_url` is https only (plain http on loopback, for tests), operator config
   only, never a tool argument. `Config.Redacted` for anything that prints
   settings.
-- **Internal addresses are never sent.** IPs are checked before the network —
-  global unicast only — and so are `ip:` / `net:` tokens inside queries.
+- **Internal addresses are never sent.** IP arguments are checked before the
+  network (IPv6 allow-list 2000::/3, then the deny table), and so is every
+  address literal anywhere in a query — not only `ip:` / `net:` terms. Terms
+  are split on ASCII space and tab only; any other space or control
+  character refuses the query. Names are the documented residual.
 - **Input that is not understood is refused, never ignored.** Unknown config
   sections and keys, keys outside a section (a bare `api_key` gets directions
   to `[api]`), present-but-empty values, out-of-range numbers, a missing
@@ -68,16 +71,17 @@ Go 1.25+. **No external dependencies — standard library only.**
   it; `get_quota` / `count_services` are where a wrong key shows.
 - **Counts are services (banners), not hosts** — measured. Hence
   `count_services` / `search_services`.
-- **Credits are guarded by the tool, not by an argument.** Only
-  `search_services` spends them; the floor is checked on every call assuming a
+- **Credits are guarded by the tool, not by an argument** (Phase 2, not yet
+  built). Only `search_services` will spend them; the floor is checked on every call assuming a
   cost of 1, a failed check means no call, and a prediction/charge mismatch
   stops searching for the process.
 - **A tool result must fit a client's budget, and the budget lives at the MCP
   boundary.** The engine returns complete views; the MCP layer compacts.
   Backstops (budget.go): any other string over 1000 characters is shortened
-  and named, no result leaves over 128 KB. Section text (`Text` / `text`) is
-  exempt by name — a path that exists to return the whole text must. The
-  CLI's `--json` stays complete.
+  and named, no result leaves over 128 KB. Section content (`Text`, `Items`,
+  `Summary`) is exempt by name — a path that exists to return the whole text
+  must. Thinning measures the encoding the ceiling measures (indented, after
+  the backstop). The CLI's `--json` stays complete.
 - **The cached unit is the upstream body**; every view is derived from it.
   Keys are `cache.Key` (hash over length-prefixed parts; inputs never appear
   in filenames). Never cached: the quota, `not_indexed`, degraded results. A

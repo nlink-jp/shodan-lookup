@@ -114,8 +114,9 @@ Exit codes:
 
 Only a third-party index is read, so no packet reaches the host under
 investigation. Every query is attributed to your Shodan account: Shodan learns
-which IPs and which search words you looked up, and internal addresses are
-refused before anything is sent. The tool is read-only by design — Shodan's
-on-demand scanning is never used.
+which IPs and which search words you looked up. A non-public IP address is
+refused wherever it appears in an argument or a query; names cannot be judged
+by their spelling and are sent as written. The tool is read-only by design —
+Shodan's on-demand scanning is never used.
 `)
 }

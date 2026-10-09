@@ -18,13 +18,17 @@ been used, and this tool what it exposes. Inferred CVEs continue to
 - **A negative answer is never manufactured.** An IP Shodan has not observed is
   reported as not in Shodan's index, never as "nothing open"; an empty list of
   inferred CVEs is not "no vulnerabilities".
-- **Credits are guarded by the tool.** Only the search spends query credits,
-  and it refuses to go below a floor you set.
+- **No query credits are spent by this build.** Host lookups, history,
+  counts and the quota are credit-free (measured). The credit-spending search
+  arrives in Phase 2, guarded by a floor you set.
 
 Only a third-party index is read, so **no packet reaches the host under
 investigation**. Every query is attributed to your Shodan account: Shodan
-learns which IPs and which search words you looked up. Internal addresses are
-refused before anything is sent.
+learns which IPs and which search words you looked up. An IP address that is
+not public — private, loopback, link-local, documentation ranges, and IPv6
+forms that embed them — is refused wherever it appears in an argument or a
+query, before anything is sent. Names (`hostname:intranet.example`) cannot be
+judged by their spelling and are sent as written.
 
 ## Status
 

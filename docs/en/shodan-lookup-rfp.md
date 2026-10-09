@@ -391,6 +391,46 @@ Following item 1 of the Phase 1 corrections, the operator decided to include `hi
 - Budget: the summary is small (ports × variants). Variants are capped at 20 per port, with the rest counted. Observation pages hold 1–50 items (default 20).
 - Cache: the upstream body itself, under `HostTTL` (measured up to 6.4 MB), keyed apart from the current record.
 
+## Independent verification of the implementation (2026-10-09, commit b30dde9)
+
+The implementation was verified independently on a pinned worktree. The findings were high 0 / medium 6 / low 10. The author triaged them; nothing was applied automatically. History was added after the pass, so it was not in scope and is left for the pre-release verification.
+
+**Adopted, by root cause**:
+
+- **The never-send rule still depended on how a term was written (M4, L5).**
+  - Through went `+ip:`, `(ip:…)`, a bare `10.0.0.1`, `hostname:10.0.0.1`, addresses inside quotes, and terms split by separators the lexer did not know (U+3000 and others).
+  - Terms are now split on ASCII space and tab only. Every address literal anywhere in a query is judged.
+  - IPv6 passes a 2000::/3 allow-list before the deny table, and Teredo servers are judged too.
+- **Sizes were measured differently from the check that acts on them (M1, L2).**
+  - Thinning measured flat and before the backstop; the ceiling measured indented and after it. Both now measure the same way.
+  - Hostnames and domains are capped and counted, and history is thinned too.
+- **Bodies were cached before they were checked (M3).**
+  - An unusable body stayed for 24 h, and refresh did not cure it. Only validated bodies are cached now.
+  - refresh reaches the name lists, and a name missing from a cached list fetches the list once more before it is refused.
+- **One document was not always the same bytes (M2).** encoding/json always escapes U+2028/U+2029, so the body is escaped the same way at fetch.
+- **The remaining silent zeros (M6, L10).**
+  - These went out unchecked: a SHA-256 written with colons or spaces, and `has_vuln` / `vuln.verified`.
+  - M6's test passed with the check removed: the fake list lacked the filter, so the query was refused for another reason. It now fails under that mutation.
+- **Details**:
+  - L1: the key is scrubbed before clipping.
+  - L3: ports with ports_only is refused.
+  - L4: a 401 during the cross-check passes through as `auth_failed`.
+  - L6: chain items print as lines.
+  - L7: the TOML subset is strict (duplicates, unclosed quotes, trailing text refused with line numbers).
+  - L8 (a)(b)(c)(d)(g): documentation fixed, notably README and the example config describing the unbuilt search as present.
+
+**Declined or deferred**:
+
+- **M5 (the IPv6 cross-check sends `ip:` unquoted)**: measured and refuted. `ip:2001:4860:4860::8888`, quoted, unabbreviated and `net:…/128` all returned 2 (credit-free). No code change.
+- **L8(e) (`service` and `count` have no `--raw`)**: §2 is amended so that `--raw` is on `host` and `history`.
+  - `service` sections are views of the `host --raw` document.
+  - `count --json` already carries upstream's total and facets whole.
+- **L8(f) (an argument/flag matrix)**: deferred to the Phase 3 documentation.
+- **L9 (a single section item over 128 KB cannot be read through MCP)**: recorded as a residual.
+  - The refusal is a structured error, never a silent cut, and the CLI reaches the item.
+  - Whether Shodan clips header values is unmeasured.
+- Out-of-scope observations (the siblings' lenient TOML parser, and Phase 2's unbuilt state not being machine-guarded) are left for release preparation.
+
 ---
 
 ## Discussion Log

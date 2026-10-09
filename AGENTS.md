@@ -71,7 +71,7 @@ schemas and the strict argument decoding the others received in the
 | `internal/config` | cve-lookup | keys and env names for Shodan; `[api] key` (presence-read, `""` refused) with `SHODAN_API_KEY` alias; https-only base_url; TTLs in hours with 0 = off; top-level key gets directions |
 | `internal/cache` | cve-lookup | `Key` rewritten to cve-lookup's later `engine.key` design (length-prefixed hash, correction 25) and moved into the cache package; inputs no longer readable in filenames; `Get` with TTL ≤ 0 always misses |
 | `internal/termsafe` | cve-lookup | doc only |
-| `internal/mcp` server.go, budget.go | cve-lookup | no engine yet; `ownCap` is section text only (`Text` / `text`) |
+| `internal/mcp` server.go, budget.go | cve-lookup | `ownCap` is section content (`Text`, `Items`, `Summary`) |
 | `internal/mcp` tools.go, usage.md | new (cve-lookup's shape) | scaffold tools only |
 | `internal/mcp` usage_test.go | cve-lookup | code packages discovered under `internal/` instead of listed |
 | `internal/app` common.go, cachecmd.go, mcpcmd.go, tests | cve-lookup | TTL fields; key state shown as set / not set |
@@ -115,7 +115,16 @@ the Phase 1 measurements"; the essentials:
   `org:1000` all 663.
 - **Timestamps are UTC** (newest observation 2–30 min before `Date`, 3/3) and
   carry no suffix (`2026-10-09T05:01:41.136770`).
-- **IPv6 works**, abbreviated or not.
+- **IPv6 works**, abbreviated or not, in host lookups and in `ip:` counts
+  (unquoted, quoted, unabbreviated and `net:…/128` all returned 2).
+- **Restricted names on Shodan's own lists**: filters `vuln`, `tag`,
+  `has_vuln`; facets `vuln`, `tag`, `vuln.verified`. All refused locally.
+- **`http.headers` exists** in real banners as an object of string values
+  (measured on 1.1.1.1), so the `http_headers` section is not empty by
+  construction.
+- **encoding/json escapes U+2028/U+2029 whatever SetEscapeHTML says** — the
+  engine escapes them at fetch so a fresh body and a cache hit are the same
+  bytes (doc_id).
 - **`ssl.cert.fingerprint:` matches SHA-1 only** — a SHA-256 returns 200
   with 0 results (the same certificate's SHA-1: 17,384). Refused locally.
   `http.favicon.hash:<favicon_hash>` works.
