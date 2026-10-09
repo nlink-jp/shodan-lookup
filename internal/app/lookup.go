@@ -126,7 +126,7 @@ func reportError(stderr io.Writer, target string, err error) {
 		code = "internal_error"
 	}
 	prefix := "shodan-lookup: "
-	if target != "" {
+	if target != "" && !strings.Contains(err.Error(), target) {
 		prefix += visible(target, false) + ": "
 	}
 	fmt.Fprintf(stderr, "%s%s (%s)\n", prefix, visible(err.Error(), false), code)
@@ -155,6 +155,11 @@ func emitJSON(w io.Writer, stderr io.Writer, v any) int {
 // multiline is true, and the caller indents continuation lines so that an
 // embedded newline cannot forge a line of this tool's own output.
 func visible(s string, multiline bool) string {
+	if multiline {
+		// A CRLF line end is a line end; only a lone CR — which would return
+		// the cursor and let the text overwrite its own line — is shown.
+		s = strings.ReplaceAll(s, "\r\n", "\n")
+	}
 	var b strings.Builder
 	for _, r := range s {
 		switch {
@@ -172,9 +177,7 @@ func visible(s string, multiline bool) string {
 }
 
 // block prints third-party multi-line text with every line behind a gutter.
-// A banner's CRLF line ends are shown as line ends, not as \x0d.
 func block(w io.Writer, text string) {
-	text = strings.ReplaceAll(text, "\r\n", "\n")
 	for _, line := range strings.Split(visible(strings.TrimRight(text, "\n"), true), "\n") {
 		fmt.Fprintf(w, "    | %s\n", strings.TrimRight(line, " \t"))
 	}

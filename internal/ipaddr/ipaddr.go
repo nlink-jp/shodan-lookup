@@ -145,8 +145,14 @@ type Error struct {
 	Reason string
 }
 
+// Error reads as one sentence: the input, quoted, then what is wrong with it
+// ("is a private address; …"). A refusal that is about the query as a whole
+// carries no Input.
 func (e *Error) Error() string {
-	return fmt.Sprintf("%q: %s", e.Input, e.Reason)
+	if e.Input == "" {
+		return e.Reason
+	}
+	return fmt.Sprintf("%q %s", e.Input, e.Reason)
 }
 
 // Parse validates one IP argument and returns its canonical form (an
@@ -156,11 +162,11 @@ func (e *Error) Error() string {
 func Parse(s string) (netip.Addr, error) {
 	in := strings.TrimSpace(s)
 	if strings.Contains(in, "%") {
-		return netip.Addr{}, &Error{Input: s, Reason: "a zoned address names an interface on this machine, not a host on the Internet"}
+		return netip.Addr{}, &Error{Input: s, Reason: "is a zoned address, which names an interface on this machine, not a host on the Internet"}
 	}
 	addr, err := netip.ParseAddr(in)
 	if err != nil {
-		return netip.Addr{}, &Error{Input: s, Reason: "not an IP address (hostnames are not accepted — resolve them with doh-lookup first)"}
+		return netip.Addr{}, &Error{Input: s, Reason: "is not an IP address (hostnames are not accepted — resolve them with doh-lookup first)"}
 	}
 	addr = addr.Unmap()
 	if c, via := Classify(addr); c != "" {
@@ -184,7 +190,7 @@ func refused(input string, c Class, via string) error {
 func CheckPrefix(s string) (netip.Prefix, error) {
 	p, err := netip.ParsePrefix(strings.TrimSpace(s))
 	if err != nil {
-		return netip.Prefix{}, &Error{Input: s, Reason: "not a CIDR prefix, so it cannot be checked before sending"}
+		return netip.Prefix{}, &Error{Input: s, Reason: "is not a CIDR prefix, so it cannot be checked before sending"}
 	}
 	p = p.Masked()
 	if c, via := Classify(p.Addr()); c != "" {

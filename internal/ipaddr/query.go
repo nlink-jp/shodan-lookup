@@ -23,10 +23,10 @@ const MaxQueryLen = 1000
 // (measured), so it must never be sent.
 func Lex(q string) ([]Term, error) {
 	if strings.TrimSpace(q) == "" {
-		return nil, &Error{Input: q, Reason: "the query is empty"}
+		return nil, &Error{Reason: "the query is empty"}
 	}
 	if len(q) > MaxQueryLen {
-		return nil, &Error{Input: q[:40] + "…", Reason: "the query is longer than 1000 characters"}
+		return nil, &Error{Reason: "the query is longer than 1000 characters"}
 	}
 	var terms []string
 	var cur strings.Builder
@@ -46,7 +46,7 @@ func Lex(q string) ([]Term, error) {
 		}
 	}
 	if inQuote {
-		return nil, &Error{Input: q, Reason: "a double quote is not closed"}
+		return nil, &Error{Reason: "a double quote is not closed in the query"}
 	}
 	if cur.Len() > 0 {
 		terms = append(terms, cur.String())

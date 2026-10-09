@@ -72,7 +72,7 @@ func runHost(args []string, version string, stdout, stderr io.Writer) int {
 				// One JSON document per IP, errors included: a stream, not an array.
 				emitJSON(stdout, stderr, map[string]any{"ip": ip, "error": errorJSON(err)})
 			} else if exitFor(err) == exitOK {
-				fmt.Fprintf(stdout, "%s\n  %s\n", visible(ip, false), visible(err.Error(), false))
+				fmt.Fprintln(stdout, visible(err.Error(), false))
 			} else {
 				reportError(stderr, ip, err)
 			}
@@ -193,8 +193,7 @@ func printHost(w io.Writer, h *engine.Host, notObserved []int, portsOnly bool) {
 			fmt.Fprintf(w, "      tls:  CN=%s  issuer %s  valid %s .. %s%s\n", orDash(s.SSL.SubjectCN), orDash(s.SSL.IssuerCN),
 				day(s.SSL.NotBefore), day(s.SSL.NotAfter), exp)
 		}
-		if s.Banner != "" {
-			first, _, _ := strings.Cut(strings.ReplaceAll(s.Banner, "\r\n", "\n"), "\n")
+		if first := firstLine(s.Banner); first != "" {
 			more := ""
 			if s.BannerChars > len([]rune(first)) {
 				more = fmt.Sprintf("  (%d chars; `service %s %d --section banner`)", s.BannerChars, h.IP, s.Port)
@@ -239,4 +238,15 @@ func day(ts string) string {
 		return ts[:10]
 	}
 	return orDash(ts)
+}
+
+// firstLine is the first non-blank line of a banner — a DNS banner starts with
+// an empty one.
+func firstLine(banner string) string {
+	for _, l := range strings.Split(banner, "\n") {
+		if t := strings.TrimSpace(l); t != "" {
+			return t
+		}
+	}
+	return ""
 }

@@ -331,3 +331,40 @@ func fillStrings(v reflect.Value) {
 		}
 	}
 }
+
+// A CRLF banner reads as lines; a lone CR — which would return the cursor and
+// overwrite the line — is still shown, not obeyed.
+func TestCRLFIsALineEndAndALoneCRIsShown(t *testing.T) {
+	if got := visible("a\r\nb", true); got != "a\nb" {
+		t.Errorf("multiline CRLF = %q", got)
+	}
+	if got := visible("a\rb", true); got != `a\x0db` {
+		t.Errorf("multiline lone CR = %q", got)
+	}
+	if got := visible("a\r\nb", false); got != `a\x0d\x0ab` {
+		t.Errorf("single-line CRLF = %q", got)
+	}
+	online(t)
+	out, _, _ := runCLI("host", "1.2.3.4")
+	if !strings.Contains(out, "banner: HTTP/1.1 200 OK  (") {
+		t.Errorf("the banner's first line carries a CR or is missing:\n%s", out)
+	}
+}
+
+func TestFirstLineSkipsBlankLines(t *testing.T) {
+	if got := firstLine("\n\n  Recursion: enabled\nmore"); got != "Recursion: enabled" {
+		t.Errorf("firstLine = %q", got)
+	}
+	if firstLine("\n \n") != "" {
+		t.Error("a blank banner produced a line")
+	}
+}
+
+// A gate refusal names the input once.
+func TestARefusalNamesTheInputOnce(t *testing.T) {
+	online(t)
+	_, errOut, _ := runCLI("host", "10.0.0.1")
+	if strings.Count(errOut, "10.0.0.1") != 1 {
+		t.Errorf("the address is repeated: %s", errOut)
+	}
+}
