@@ -20,10 +20,20 @@ const MaxFacetValues = 1000
 // DefaultFacetValues is what a facet without :N asks for.
 const DefaultFacetValues = 10
 
-// restricted names the filters and facets Shodan withholds from Membership
-// (pricing page). They are refused before sending because the restriction does
-// not come back as an error: vuln:CVE-2021-44228 answered 200 with a count of 3.
-var restricted = map[string]bool{"vuln": true, "tag": true}
+// isRestricted reports the filters and facets Shodan withholds from
+// Membership (pricing page: vuln and tag), with the names derived from them
+// that its lists carry (has_vuln, vuln.verified). They are refused before
+// sending because the restriction does not come back as an error:
+// vuln:CVE-2021-44228 answered 200 with a count of 3.
+func isRestricted(name string) bool {
+	switch {
+	case name == "vuln", name == "tag", name == "has_vuln":
+		return true
+	case strings.HasPrefix(name, "vuln."), strings.HasPrefix(name, "tag."):
+		return true
+	}
+	return false
+}
 
 // listTTL is how long the filter and facet name lists stay cached. They are
 // vocabulary, not data, and change with Shodan releases.
@@ -89,7 +99,7 @@ func (e *Engine) CountServices(ctx context.Context, query string, facets []Facet
 	if err := e.checkKey(); err != nil {
 		return nil, err
 	}
-	if err := e.checkNames(ctx, terms, facets); err != nil {
+	if err := e.checkNames(ctx, terms, facets, refresh); err != nil {
 		return nil, err
 	}
 
@@ -99,7 +109,7 @@ func (e *Engine) CountServices(ctx context.Context, query string, facets []Facet
 	}
 	facetParam := strings.Join(specs, ",")
 	en, cached, err := e.fetch(ctx, cache.Key("count", query, facetParam), e.cfg.CountTTL, refresh,
-		func(ctx context.Context) (*shodan.Response, error) { return e.up.Count(ctx, query, facetParam) })
+		func(ctx context.Context) (*shodan.Response, error) { return e.up.Count(ctx, query, facetParam) }, validCount)
 	if err != nil {
 		return nil, err
 	}
@@ -139,13 +149,13 @@ func (e *Engine) CountServices(ctx context.Context, query string, facets []Facet
 // An unknown filter becomes free text upstream and matches nothing; an unknown
 // facet is dropped without a word (both measured). Either would read as
 // "nothing found".
-func (e *Engine) checkNames(ctx context.Context, terms []ipaddr.Term, facets []FacetSpec) error {
+func (e *Engine) checkNames(ctx context.Context, terms []ipaddr.Term, facets []FacetSpec, refresh bool) error {
 	var filterNames []string
 	for _, t := range terms {
 		if t.Filter == "" {
 			continue
 		}
-		if restricted[t.Filter] {
+		if isRestricted(t.Filter) {
 			return planRestricted("filter", t.Filter)
 		}
 		filterNames = append(filterNames, t.Filter)
@@ -155,7 +165,7 @@ func (e *Engine) checkNames(ctx context.Context, terms []ipaddr.Term, facets []F
 	}
 	seen := map[string]bool{}
 	for _, f := range facets {
-		if restricted[f.Name] {
+		if isRestricted(f.Name) {
 			return planRestricted("facet", f.Name)
 		}
 		if seen[f.Name] {
@@ -164,28 +174,50 @@ func (e *Engine) checkNames(ctx context.Context, terms []ipaddr.Term, facets []F
 		seen[f.Name] = true
 	}
 	if len(filterNames) > 0 {
-		known, err := e.nameList(ctx, "filters", e.up.Filters)
-		if err != nil {
+		if n, err := e.unknownName(ctx, "filters", e.up.Filters, filterNames, refresh); err != nil {
 			return err
-		}
-		for _, n := range filterNames {
-			if !known[n] {
-				return invalid(fmt.Sprintf("%q is not a Shodan filter name (filter names are lower case; to search for the text, quote it). Shodan would read it as free text and match nothing", n+":"))
-			}
+		} else if n != "" {
+			return invalid(fmt.Sprintf("%q is not a Shodan filter name (filter names are lower case; to search for the text, quote it). Shodan would read it as free text and match nothing", n+":"))
 		}
 	}
 	if len(facets) > 0 {
-		known, err := e.nameList(ctx, "facets", e.up.Facets)
-		if err != nil {
-			return err
-		}
+		names := make([]string, 0, len(facets))
 		for _, f := range facets {
-			if !known[f.Name] {
-				return invalid(fmt.Sprintf("%q is not a Shodan facet name. Shodan would drop it without saying so", f.Name))
-			}
+			names = append(names, f.Name)
+		}
+		if n, err := e.unknownName(ctx, "facets", e.up.Facets, names, refresh); err != nil {
+			return err
+		} else if n != "" {
+			return invalid(fmt.Sprintf("%q is not a Shodan facet name. Shodan would drop it without saying so", n))
 		}
 	}
 	return nil
+}
+
+// unknownName returns the first name not on Shodan's list, or "". A list
+// read from the cache is fetched again once before a name is refused, so a
+// name Shodan added since does not wait out the list's TTL.
+func (e *Engine) unknownName(ctx context.Context, kind string, get func(context.Context) (*shodan.Response, error), names []string, refresh bool) (string, error) {
+	known, cached, err := e.nameList(ctx, kind, get, refresh)
+	if err != nil {
+		return "", err
+	}
+	for _, n := range names {
+		if known[n] {
+			continue
+		}
+		if cached {
+			if known, _, err = e.nameList(ctx, kind, get, true); err != nil {
+				return "", err
+			}
+			cached = false
+			if known[n] {
+				continue
+			}
+		}
+		return n, nil
+	}
+	return "", nil
 }
 
 // checkValue refuses filter values that were measured to match nothing
@@ -195,6 +227,8 @@ func checkValue(t ipaddr.Term) error {
 		return nil
 	}
 	for v := range strings.SplitSeq(t.Value, ",") {
+		// Written as tools print it: AB:CD:… (OpenSSL, browsers), spaced, any case.
+		v = strings.NewReplacer(":", "", " ", "").Replace(v)
 		if len(v) == 64 && isHex(v) {
 			return invalid("ssl.cert.fingerprint matches a certificate's SHA-1 (40 hex digits); a SHA-256 matches nothing, without an error (measured). Use the sha1 that lookup_host reports")
 		}
@@ -218,21 +252,41 @@ func planRestricted(kind, name string) error {
 		"the %s %q is not available on a Membership plan (Shodan's pricing page); it is refused because the restriction does not come back as an error — a vuln: count measured 3 for Log4Shell", kind, name)}
 }
 
-// nameList reads one of Shodan's name lists through the cache.
-func (e *Engine) nameList(ctx context.Context, kind string, get func(context.Context) (*shodan.Response, error)) (map[string]bool, error) {
-	en, _, err := e.fetch(ctx, cache.Key("names", kind), listTTL, false, get)
-	if err != nil {
-		return nil, err
+// nameList reads one of Shodan's name lists through the cache. A body that
+// is not a non-empty list of names is an error and is never cached.
+func (e *Engine) nameList(ctx context.Context, kind string, get func(context.Context) (*shodan.Response, error), refresh bool) (map[string]bool, bool, error) {
+	parse := func(body []byte) ([]string, error) {
+		var names []string
+		if json.Unmarshal(body, &names) != nil || len(names) == 0 {
+			return nil, &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's list of " + kind + " is not a list of names"}
+		}
+		return names, nil
 	}
-	var names []string
-	if json.Unmarshal(en.Body, &names) != nil || len(names) == 0 {
-		return nil, &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's list of " + kind + " is not a list of names"}
+	en, cached, err := e.fetch(ctx, cache.Key("names", kind), listTTL, refresh, get,
+		func(b []byte) error { _, err := parse(b); return err })
+	if err != nil {
+		return nil, false, err
+	}
+	names, err := parse(en.Body)
+	if err != nil {
+		return nil, false, err
 	}
 	set := make(map[string]bool, len(names))
 	for _, n := range names {
 		set[n] = true
 	}
-	return set, nil
+	return set, cached, nil
+}
+
+// validCount accepts a count body that carries a total.
+func validCount(body []byte) error {
+	var c struct {
+		Total *int `json:"total"`
+	}
+	if json.Unmarshal(body, &c) != nil || c.Total == nil {
+		return &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's count has no total"}
+	}
+	return nil
 }
 
 // facetValue renders a facet value, which Shodan sends as a string or a

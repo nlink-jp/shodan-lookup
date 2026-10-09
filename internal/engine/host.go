@@ -122,7 +122,7 @@ func (e *Engine) loadHost(ctx context.Context, ipArg string, refresh bool) (*hos
 	}
 	ip := addr.String()
 	en, cached, err := e.fetch(ctx, cache.Key("host", ip), e.cfg.HostTTL, refresh,
-		func(ctx context.Context) (*shodan.Response, error) { return e.up.Host(ctx, ip) })
+		func(ctx context.Context) (*shodan.Response, error) { return e.up.Host(ctx, ip) }, validHost)
 	if err != nil {
 		return nil, e.hostError(ctx, ip, err, "the record")
 	}
@@ -158,7 +158,11 @@ func (e *Engine) hostError(ctx context.Context, ip string, err error, what strin
 		return err
 	}
 	n, cerr := e.countIP(ctx, ip)
-	switch {
+	switch c := shodan.Code(cerr); {
+	case c == shodan.CodeAuthFailed || c == shodan.CodeMissingKey:
+		// Host lookups do not check the key; the count does. A refused key is
+		// the cause, and "retry later" would be the wrong advice.
+		return cerr
 	case cerr != nil:
 		return &shodan.Error{Code: shodan.CodeUpstream, Status: 404, Message: fmt.Sprintf(
 			"Shodan answered \"no information\" for %s, and the check that would confirm it failed (%s) — this is not evidence that Shodan has not observed it", ip, shodan.Code(cerr))}
@@ -351,4 +355,13 @@ func retryHint(what string) string {
 		return " — measured for large hosts, whose history Shodan does not return; the current record is available through lookup_host"
 	}
 	return " — retry later"
+}
+
+// validHost accepts a body that decodes as a host record.
+func validHost(body []byte) error {
+	var w wireHost
+	if err := json.Unmarshal(body, &w); err != nil {
+		return &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's host record is not the shape this tool reads: " + err.Error()}
+	}
+	return nil
 }

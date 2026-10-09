@@ -149,22 +149,22 @@ func CheckQuery(q string) ([]Term, error) {
 			}
 		}
 	}
-	if err := checkLiterals(q); err != nil {
+	if err := checkLiterals(q, terms); err != nil {
 		return nil, err
 	}
 	return terms, nil
 }
 
 // ipv4Literal finds every dotted quad anywhere in a query, glued to a word or
-// not (hostname:10.0.0.1, e10.0.0.1). ipv6Literal finds runs an IPv6 address
-// can be written with; a run is tried whole and from each colon on, because a
-// filter name's last letters can be hex (hostname: ends in "e:").
+// not (hostname:10.0.0.1, e10.0.0.1). ipv6Run finds runs an IPv6 address can
+// be written with; runs are taken from each term as written and from its
+// value with the filter name removed (hostname: ends in a hex letter).
 var (
 	ipv4Literal = regexp.MustCompile(`[0-9]{1,3}(?:\.[0-9]{1,3}){3}`)
-	ipv6Literal = regexp.MustCompile(`[0-9A-Fa-f:.%]*:[0-9A-Fa-f:.%]*`)
+	ipv6Run     = regexp.MustCompile(`[0-9A-Fa-f:.%]*:[0-9A-Fa-f:.%]*`)
 )
 
-func checkLiterals(q string) error {
+func checkLiterals(q string, terms []Term) error {
 	for _, cand := range ipv4Literal.FindAllString(q, -1) {
 		addr, err := netip.ParseAddr(cand)
 		if err != nil {
@@ -174,43 +174,36 @@ func checkLiterals(q string) error {
 			return refused(cand, c, via)
 		}
 	}
-	for _, run := range ipv6Literal.FindAllString(q, -1) {
-		// The first candidate that reads as an address is the address: the
-		// tail of a public address (4860::8888 inside 2001:4860:4860::8888)
-		// is not another one.
-		for _, cand := range v6Candidates(run) {
-			addr, err := netip.ParseAddr(cand)
-			if err != nil || !addr.Is6() {
-				continue // not an address: a time, a fingerprint, filter:value
+	for _, t := range terms {
+		// Both the term as written and its value: fe80::1 lexes as a filter
+		// named fe80, while hostname:fe80::1 needs its name removed.
+		for _, run := range append(ipv6Run.FindAllString(t.Raw, -1), ipv6Run.FindAllString(t.Value, -1)...) {
+			for _, cand := range v6Candidates(run) {
+				addr, err := netip.ParseAddr(cand)
+				if err != nil || !addr.Is6() {
+					continue // not an address: a time, a colon-separated fingerprint
+				}
+				if strings.Contains(cand, "%") {
+					return &Error{Input: cand, Reason: "is a zoned address, which names an interface on this machine"}
+				}
+				if c, via := Classify(addr.Unmap()); c != "" {
+					return refused(cand, c, via)
+				}
+				break
 			}
-			if strings.Contains(cand, "%") {
-				return &Error{Input: cand, Reason: "is a zoned address, which names an interface on this machine"}
-			}
-			if c, via := Classify(addr.Unmap()); c != "" {
-				return refused(cand, c, via)
-			}
-			break
 		}
 	}
 	return nil
 }
 
-// v6Candidates is the run itself and every suffix that starts at a colon,
-// longest first, each also without trailing sentence punctuation.
+// v6Candidates is the run as found, without a single leading colon left by a
+// prefix such as +ip: or (ip:, and without trailing sentence punctuation. A
+// run is never cut further: a colon-separated fingerprint holds eight-group
+// stretches that read as addresses and are not.
 func v6Candidates(run string) []string {
-	var out []string
-	add := func(c string) {
-		out = append(out, c, strings.TrimRight(c, "."))
-	}
-	add(run)
-	for i := 0; i < len(run); i++ {
-		if run[i] == ':' && i+1 < len(run) {
-			add(run[i+1:])
-			if i+2 < len(run) && run[i+1] == ':' {
-				continue
-			}
-			add(run[i:]) // keep a leading "::"
-		}
+	out := []string{run, strings.TrimRight(run, ".")}
+	if strings.HasPrefix(run, ":") && !strings.HasPrefix(run, "::") {
+		out = append(out, run[1:], strings.TrimRight(run[1:], "."))
 	}
 	return out
 }

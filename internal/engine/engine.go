@@ -130,9 +130,11 @@ func (e *Engine) checkKey() error {
 }
 
 // fetch reads one upstream body through the cache. ttl 0 means this kind is
-// not cached at all: no read, no write.
+// not cached at all: no read, no write. valid checks a fetched body before it
+// is cached: a body this tool cannot use is an error now and must not become
+// a cached error for the whole TTL.
 func (e *Engine) fetch(ctx context.Context, key string, ttl time.Duration, refresh bool,
-	get func(context.Context) (*shodan.Response, error)) (*entry, bool, error) {
+	get func(context.Context) (*shodan.Response, error), valid func([]byte) error) (*entry, bool, error) {
 	if !refresh && ttl > 0 {
 		if raw, ok := e.cache.Get(key, e.now(), ttl); ok {
 			var en entry
@@ -152,7 +154,17 @@ func (e *Engine) fetch(ctx context.Context, key string, ttl time.Duration, refre
 	if err := json.Compact(&compact, resp.Body); err != nil {
 		return nil, false, &shodan.Error{Code: shodan.CodeDecode, Message: "upstream body for " + resp.Endpoint + " is not JSON: " + err.Error()}
 	}
-	en := &entry{FetchedAt: resp.FetchedAt.UTC(), Endpoint: resp.Endpoint, Body: compact.Bytes()}
+	// encoding/json writes U+2028 and U+2029 as \u2028 / \u2029 whatever
+	// SetEscapeHTML says, so they are written that way here too: in JSON they
+	// can only occur inside a string, where the escape is the same character.
+	body := bytes.ReplaceAll(compact.Bytes(), []byte("\u2028"), []byte(`\u2028`))
+	body = bytes.ReplaceAll(body, []byte("\u2029"), []byte(`\u2029`))
+	if valid != nil {
+		if err := valid(body); err != nil {
+			return nil, false, err
+		}
+	}
+	en := &entry{FetchedAt: resp.FetchedAt.UTC(), Endpoint: resp.Endpoint, Body: body}
 	if ttl > 0 {
 		// Written without HTML escaping: json.Marshal would turn < > & inside
 		// the body into \u003c and friends, and the cached bytes would no

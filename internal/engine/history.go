@@ -205,7 +205,7 @@ func (e *Engine) loadHistory(ctx context.Context, ipArg string, refresh bool) (s
 	}
 	ip := addr.String()
 	en, cached, err := e.fetch(ctx, cache.Key("history", ip), e.cfg.HostTTL, refresh,
-		func(ctx context.Context) (*shodan.Response, error) { return e.up.HostHistory(ctx, ip) })
+		func(ctx context.Context) (*shodan.Response, error) { return e.up.HostHistory(ctx, ip) }, validHost)
 	if err != nil {
 		return "", nil, false, nil, e.hostError(ctx, ip, err, "its history")
 	}

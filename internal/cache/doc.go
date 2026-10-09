@@ -15,6 +15,10 @@
 // upstream call failed would otherwise freeze an incomplete answer in place
 // for the whole TTL, and the analyst would have no way to tell.
 //
+// Shodan's lists of filter and facet names are cached for a fixed 24 hours
+// whatever the TTLs say: they are the API's vocabulary, not data about any
+// host, and every refused name fetches the list again once before refusing.
+//
 // Entry names are hashes of what determined the answer (Key), so the IPs and
 // queries that were investigated do not sit readable in a directory listing.
 // The bodies themselves are Shodan's data and stay on this machine.

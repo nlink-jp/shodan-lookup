@@ -49,6 +49,7 @@ type fakeUp struct {
 	mu        sync.Mutex
 	hosts     map[string]string // ip -> body
 	histories map[string]string // ip -> history body
+	filtersRaw string // when set, the filters list answers this body
 	hostErr   map[string]error
 	totals    map[string]int // count query -> total
 	countErr  error
@@ -63,8 +64,8 @@ func newFake() *fakeUp {
 	return &fakeUp{
 		hosts:   map[string]string{"1.2.3.4": hostFixture},
 		hostErr: map[string]error{}, totals: map[string]int{}, countRaw: map[string]string{}, histories: map[string]string{},
-		filters: []string{"port", "country", "org", "ip", "net", "http.title", "product", "vuln", "tag"},
-		facets:  []string{"port", "country", "org", "ip", "vuln"},
+		filters: []string{"port", "country", "org", "ip", "net", "http.title", "product", "vuln", "tag", "has_vuln", "ssl.cert.fingerprint"},
+		facets:  []string{"port", "country", "org", "ip", "vuln", "vuln.verified"},
 		apiInfo: `{"plan": "dev", "query_credits": 97, "scan_credits": 100, "monitored_ips": 0,
 		           "usage_limits": {"query_credits": 100, "scan_credits": 100, "monitored_ips": 16}}`,
 	}
@@ -126,6 +127,9 @@ func (f *fakeUp) Count(_ context.Context, query, facets string) (*shodan.Respons
 
 func (f *fakeUp) Filters(context.Context) (*shodan.Response, error) {
 	f.record("filters")
+	if f.filtersRaw != "" {
+		return resp(f.filtersRaw, "/shodan/host/search/filters"), nil
+	}
 	b, _ := json.Marshal(f.filters)
 	return resp(string(b), "/shodan/host/search/filters"), nil
 }
@@ -428,8 +432,13 @@ func TestCountChecksNamesBeforeSending(t *testing.T) {
 	if err != nil || c.Total != 4 || c.Unit != "services" {
 		t.Errorf("free-text count: %+v %v", c, err)
 	}
-	if up.count("filters") != 1 {
-		t.Errorf("the filter list was fetched %d times; it is cached", up.count("filters"))
+	// A query whose names are all known is answered from the cached list.
+	before := up.count("filters")
+	if _, err := e.CountServices(ctx, "port:22 country:JP", nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if up.count("filters") != before {
+		t.Errorf("the filter list was fetched again for known names")
 	}
 }
 
@@ -501,4 +510,105 @@ func TestASHA1FingerprintIsSent(t *testing.T) {
 	if err != nil || c.Total != 7 {
 		t.Errorf("sha1 pivot: %+v %v", c, err)
 	}
+}
+
+// The independent verification of b30dde9 found these (M2, M3, M6, L4, L10).
+
+// U+2028 and U+2029 are rewritten by encoding/json whatever SetEscapeHTML
+// says; a fresh record and its cache hit must still hash the same.
+func TestLineSeparatorsDoNotMoveTheDocID(t *testing.T) {
+	up := newFake()
+	up.hosts["1.2.3.4"] = strings.Replace(hostFixture, "SSH-2.0-ExampleSSH", "SSH-2.0-Example\u2028SSH\u2029", 1)
+	e := testEngine(t, up)
+	a, err := e.LookupHost(context.Background(), "1.2.3.4", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := e.LookupHost(context.Background(), "1.2.3.4", false)
+	if !b.Provenance.Cached || a.Provenance.DocID != b.Provenance.DocID {
+		t.Errorf("doc_id moved between a fetch and a cache hit: %s vs %s", a.Provenance.DocID, b.Provenance.DocID)
+	}
+	if !strings.Contains(b.Services[0].Banner, "Example\u2028SSH") {
+		t.Errorf("the character itself was lost: %q", b.Services[0].Banner)
+	}
+}
+
+// A body this tool cannot use is an error now, and is never cached.
+func TestAnUnusableBodyIsNotCached(t *testing.T) {
+	up := newFake()
+	up.filtersRaw = `[]`
+	e := testEngine(t, up)
+	_, err := e.CountServices(context.Background(), "port:22", nil, false)
+	wantCode(t, err, shodan.CodeDecode)
+	up.filtersRaw = ""
+	if _, err := e.CountServices(context.Background(), "port:22", nil, false); err != nil {
+		t.Errorf("an unusable name list was cached: %v", err)
+	}
+	up.countRaw["port:23|"] = `{"matches": []}`
+	_, err = e.CountServices(context.Background(), "port:23", nil, false)
+	wantCode(t, err, shodan.CodeDecode)
+	delete(up.countRaw, "port:23|")
+	if _, err := e.CountServices(context.Background(), "port:23", nil, false); err != nil {
+		t.Errorf("a count without a total was cached: %v", err)
+	}
+}
+
+// A name Shodan added after the list was cached is fetched again once, not
+// refused for the list's 24 hours; refresh reaches the lists too.
+func TestANewNameRefetchesTheListOnce(t *testing.T) {
+	up := newFake()
+	e := testEngine(t, up)
+	if _, err := e.CountServices(context.Background(), "port:22", nil, false); err != nil {
+		t.Fatal(err)
+	}
+	up.filters = append(up.filters, "newfilter")
+	if _, err := e.CountServices(context.Background(), "newfilter:x", nil, false); err != nil {
+		t.Errorf("a name added upstream was refused from the cached list: %v", err)
+	}
+	if up.count("filters") != 2 {
+		t.Errorf("filters fetched %d times, want 2", up.count("filters"))
+	}
+	if _, err := e.CountServices(context.Background(), "nosuch:x", nil, false); Code(err) != CodeInvalidArgument {
+		t.Errorf("an unknown name after a fresh list: %v", err)
+	}
+	before := up.count("filters")
+	_, _ = e.CountServices(context.Background(), "port:24", nil, true)
+	if up.count("filters") != before+1 {
+		t.Error("refresh did not reach the name list")
+	}
+}
+
+func TestSHA256FingerprintsAreRefusedHoweverWritten(t *testing.T) {
+	e := testEngine(t, newFake())
+	hex := strings.Repeat("ab", 32)
+	colons := strings.TrimSuffix(strings.Repeat("AB:", 32), ":")
+	for _, q := range []string{
+		"ssl.cert.fingerprint:" + hex,
+		"ssl.cert.fingerprint:" + colons,
+		`ssl.cert.fingerprint:" ` + hex + `"`,
+		"ssl.cert.fingerprint:" + strings.Repeat("a1", 20) + "," + hex,
+	} {
+		_, err := e.CountServices(context.Background(), q, nil, false)
+		wantCode(t, err, CodeInvalidArgument)
+		if !strings.Contains(err.Error(), "SHA-1") {
+			t.Errorf("%s: refused for another reason: %v", q, err)
+		}
+	}
+}
+
+// Host lookups do not check the key; when the cross-check's count refuses
+// it, that is the answer — not "retry later".
+func TestARefusedKeyDuringTheCrossCheckIsReportedAsSuch(t *testing.T) {
+	up := newFake()
+	up.countErr = &shodan.Error{Code: shodan.CodeAuthFailed, Status: 401, Message: "401"}
+	_, err := testEngine(t, up).LookupHost(context.Background(), "5.6.7.8", false)
+	wantCode(t, err, shodan.CodeAuthFailed)
+}
+
+func TestDerivedRestrictedNamesAreRefused(t *testing.T) {
+	e := testEngine(t, newFake())
+	_, err := e.CountServices(context.Background(), "has_vuln:true", nil, false)
+	wantCode(t, err, CodePlanRestricted)
+	_, err = e.CountServices(context.Background(), "port:22", []FacetSpec{{Name: "vuln.verified", N: 3}}, false)
+	wantCode(t, err, CodePlanRestricted)
 }

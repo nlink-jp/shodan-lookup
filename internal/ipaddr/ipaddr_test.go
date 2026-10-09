@@ -220,6 +220,8 @@ func TestQueriesThatSlippedPastTheTermCheck(t *testing.T) {
 		"apache 172.16.0.0/12",     // a prefix in free text
 		"ssh fe80::1",              // IPv6 link-local in free text
 		"x ::1",                    // loopback in free text
+		"+ip:fe80::1",              // IPv6 behind a prefix
+		"hostname:fe80::1",         // IPv6 as another filter's value
 		"010.000.000.001",          // a zero-padded dotted quad cannot be judged
 		"port:22 \u202e",           // a bidi control
 	} {
@@ -239,6 +241,7 @@ func TestOrdinaryQueriesStillPass(t *testing.T) {
 		"http.favicon.hash:-1234567",
 		"net:8.8.8.0/24 port:53",
 		"ip:2001:4860:4860::8888",
+		"ssl.cert.fingerprint:" + strings.TrimSuffix(strings.Repeat("AB:", 20), ":"), // a SHA-1 with colons is not an address
 		strings.Repeat("日", 400), // 1,200 bytes, 400 characters: within the limit
 	} {
 		if _, err := CheckQuery(q); err != nil {
