@@ -199,3 +199,18 @@ func TestPutLeavesNoTempFiles(t *testing.T) {
 		}
 	}
 }
+
+// A hit returns the bytes that were put. encoding/json would otherwise escape
+// < > & on the way in, and anything hashing the body would see it change.
+func TestAHitIsTheBytesThatWerePut(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	now := time.Unix(1_700_000_000, 0)
+	want := json.RawMessage(`{"html":"<b>a & b</b>"}`)
+	if err := s.Put("k.json", want, now); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := s.Get("k.json", now, time.Hour)
+	if !ok || string(got) != string(want) {
+		t.Errorf("Get = %s, want %s", got, want)
+	}
+}

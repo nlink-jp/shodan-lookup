@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -102,11 +103,17 @@ func (s *Store) Put(key string, result json.RawMessage, now time.Time) error {
 	if err := os.MkdirAll(s.Dir, 0o755); err != nil {
 		return err
 	}
-	b, err := json.Marshal(record{FetchedAtUnix: now.Unix(), Result: result})
-	if err != nil {
+	// Encoded without HTML escaping: json.Marshal would rewrite < > & inside
+	// the stored document as \u003c and friends, and a hit would no longer be
+	// the bytes that were put — a hash of the body (a doc_id) would change
+	// between a fetch and the next read.
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(record{FetchedAtUnix: now.Unix(), Result: result}); err != nil {
 		return err
 	}
-	return writeAtomic(filepath.Join(s.Dir, key), b)
+	return writeAtomic(filepath.Join(s.Dir, key), bytes.TrimSpace(b.Bytes()))
 }
 
 // Stat describes the cache contents.
