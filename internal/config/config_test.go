@@ -343,10 +343,36 @@ func TestParseValue(t *testing.T) {
 		`'single'`:                 "single",
 		`bare # comment`:           "bare",
 		`12`:                       "12",
+		`"v" # a comment`:          "v",
 	} {
-		if got := parseValue(in); got != want {
-			t.Errorf("parseValue(%s) = %q, want %q", in, got, want)
+		if got, err := parseValue(in); err != nil || got != want {
+			t.Errorf("parseValue(%s) = %q %v, want %q", in, got, err, want)
 		}
+	}
+}
+
+// From the independent verification of b30dde9 (L7): what the vendored
+// parser read as something, silently.
+func TestTheParserRefusesWhatItDoesNotUnderstand(t *testing.T) {
+	for _, body := range []string{
+		"[api]\nkey = \"a\"\nkey = \"b\"\n",          // a duplicate key
+		"[cache]\nhost_ttl_hours = 1\n[cache]\ncount_ttl_hours = 1\n", // a duplicate section
+		"[api]\nkey = \"abc\" trailing\n",               // text after a closed value
+		"[api]\nkey = \"abc\n",                           // an unclosed quote
+		"[api] junk\nkey = \"a\"\n",                      // text after a header
+	} {
+		dir := isolate(t)
+		_, err := Load(writeConfig(t, dir, body), 0)
+		if err == nil || !strings.Contains(err.Error(), "line ") {
+			t.Errorf("%q: %v", body, err)
+		}
+		if err != nil && strings.Contains(err.Error(), "abc") {
+			t.Errorf("%q: the error quotes the value: %v", body, err)
+		}
+	}
+	dir := isolate(t)
+	if _, err := Load(writeConfig(t, dir, "[api] # the key\nkey = \"a\" # set\n"), 0); err != nil {
+		t.Errorf("comments after a header or a value were refused: %v", err)
 	}
 }
 

@@ -543,12 +543,16 @@ func expandHome(p string) string {
 // parseTOML parses the minimal subset this tool needs: [section] headers and
 // key = value lines, where value is an optionally quoted string. Comments start
 // with '#'. It intentionally does not support arrays, nested tables, or typed
-// values. Vendored from the sibling lookup tools rather than imported, matching
-// the series.
+// values. Vendored from the sibling lookup tools and made strict here: a
+// repeated key or section, text after a header or after a closed value, and an
+// unclosed quote are errors with their line number — the original read them
+// as something, silently (a duplicate key won, a stray quote became part of
+// the API key).
 func parseTOML(r io.Reader) (map[string]map[string]string, error) {
 	sections := map[string]map[string]string{}
 	current := ""
 	sections[current] = map[string]string{}
+	seenSection := map[string]bool{"": true}
 
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -564,10 +568,15 @@ func parseTOML(r io.Reader) (map[string]map[string]string, error) {
 			if end < 0 {
 				return nil, fmt.Errorf("line %d: unterminated section header", line)
 			}
-			current = strings.TrimSpace(raw[1:end])
-			if _, ok := sections[current]; !ok {
-				sections[current] = map[string]string{}
+			if rest := strings.TrimSpace(raw[end+1:]); rest != "" && !strings.HasPrefix(rest, "#") {
+				return nil, fmt.Errorf("line %d: text after the section header", line)
 			}
+			current = strings.TrimSpace(raw[1:end])
+			if seenSection[current] {
+				return nil, fmt.Errorf("line %d: section [%s] appears twice", line, current)
+			}
+			seenSection[current] = true
+			sections[current] = map[string]string{}
 			continue
 		}
 		eq := strings.IndexByte(raw, '=')
@@ -575,9 +584,15 @@ func parseTOML(r io.Reader) (map[string]map[string]string, error) {
 			return nil, fmt.Errorf("line %d: expected key = value", line)
 		}
 		key := strings.TrimSpace(raw[:eq])
-		val := parseValue(strings.TrimSpace(raw[eq+1:]))
 		if key == "" {
 			return nil, fmt.Errorf("line %d: empty key", line)
+		}
+		val, err := parseValue(strings.TrimSpace(raw[eq+1:]))
+		if err != nil {
+			return nil, fmt.Errorf("line %d: %s: %w", line, key, err)
+		}
+		if _, dup := sections[current][key]; dup {
+			return nil, fmt.Errorf("line %d: %s is set twice", line, key)
 		}
 		sections[current][key] = val
 	}
@@ -587,17 +602,22 @@ func parseTOML(r io.Reader) (map[string]map[string]string, error) {
 	return sections, nil
 }
 
-// parseValue strips surrounding quotes, or trims a trailing inline comment from
-// a bare value.
-func parseValue(v string) string {
-	if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') {
+// parseValue reads a quoted string, which must close and may be followed only
+// by a comment, or a bare value, from which a trailing comment is trimmed.
+func parseValue(v string) (string, error) {
+	if len(v) > 0 && (v[0] == '"' || v[0] == '\'') {
 		q := v[0]
-		if end := strings.IndexByte(v[1:], q); end >= 0 {
-			return v[1 : 1+end]
+		end := strings.IndexByte(v[1:], q)
+		if end < 0 {
+			return "", fmt.Errorf("the quote is not closed")
 		}
+		if rest := strings.TrimSpace(v[2+end:]); rest != "" && !strings.HasPrefix(rest, "#") {
+			return "", fmt.Errorf("text after the quoted value")
+		}
+		return v[1 : 1+end], nil
 	}
 	if hash := strings.IndexByte(v, '#'); hash >= 0 {
 		v = strings.TrimSpace(v[:hash])
 	}
-	return v
+	return v, nil
 }
