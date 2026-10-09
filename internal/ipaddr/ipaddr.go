@@ -86,14 +86,15 @@ var embeds = []embed{
 	{mustPrefix("64:ff9b::/96"), "nat64", last4},
 	{mustPrefix("64:ff9b:1::/48"), "nat64-local", last4},
 	{mustPrefix("2002::/16"), "6to4", bytes2to5},
-	{mustPrefix("2001::/32"), "teredo", last4Inverted},
+	{mustPrefix("2001::/32"), "teredo", last4Inverted}, // the client; the server is judged too (Classify)
 	// ::/96 (IPv4-compatible) last: :: and ::1 live inside it and are judged
 	// exactly before the embeds run.
 	{mustPrefix("::/96"), "ipv4-compatible", last4},
 }
 
 var (
-	unspecified4 = netip.MustParseAddr("0.0.0.0")
+	globalUnicast6 = mustPrefix("2000::/3")
+	unspecified4   = netip.MustParseAddr("0.0.0.0")
 	broadcast4   = netip.MustParseAddr("255.255.255.255")
 )
 
@@ -115,10 +116,22 @@ func Classify(addr netip.Addr) (Class, string) {
 		for _, e := range embeds {
 			if e.prefix.Contains(addr) {
 				c, _ := Classify(e.extract(addr))
+				if c == "" && e.name == "teredo" {
+					c, _ = Classify(teredoServer(addr))
+				}
 				return c, e.name
 			}
 		}
-		return lookup(addr), ""
+		if c := lookup(addr); c != "" {
+			return c, ""
+		}
+		// An allow-list, not only a deny-list: global unicast IPv6 is
+		// 2000::/3. Anything outside it (4000::/3, ::ffff:0:0/96 translated
+		// forms, unassigned space) is not an address on the public Internet.
+		if !globalUnicast6.Contains(addr) {
+			return ClassReserved, ""
+		}
+		return "", ""
 	}
 	if addr == broadcast4 {
 		return ClassBroadcast, ""
@@ -209,6 +222,13 @@ func last4(a netip.Addr) netip.Addr {
 func bytes2to5(a netip.Addr) netip.Addr {
 	b := a.As16()
 	return netip.AddrFrom4([4]byte{b[2], b[3], b[4], b[5]})
+}
+
+// teredoServer returns the Teredo server's IPv4 address, bits 32–63
+// (RFC 4380 §4).
+func teredoServer(a netip.Addr) netip.Addr {
+	b := a.As16()
+	return netip.AddrFrom4([4]byte{b[4], b[5], b[6], b[7]})
 }
 
 // last4Inverted returns the IPv4 address Teredo stores in the low 32 bits with

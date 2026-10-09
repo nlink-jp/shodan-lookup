@@ -202,3 +202,67 @@ func TestCheckQueryJudgesIPAndNetValues(t *testing.T) {
 		}
 	}
 }
+
+// The independent verification of b30dde9 sent these through the gate. Each
+// must now be refused before anything is sent.
+func TestQueriesThatSlippedPastTheTermCheck(t *testing.T) {
+	for _, q := range []string{
+		"foo\u3000ip:10.0.0.1",     // ideographic space as a separator
+		"foo\vip:10.0.0.1",         // vertical tab
+		"foo\fip:10.0.0.1",         // form feed
+		"foo\u00a0ip:10.0.0.1",     // no-break space
+		"port:22\nip:10.0.0.1",     // a line break
+		"+ip:10.0.0.1",             // a prefix before the filter
+		"(ip:10.0.0.1)",            // parentheses
+		"10.0.0.1",                 // a bare address
+		"hostname:10.0.0.1",        // an address as another filter's value
+		`http.html:"192.168.1.1"`,  // inside quotes
+		"apache 172.16.0.0/12",     // a prefix in free text
+		"ssh fe80::1",              // IPv6 link-local in free text
+		"x ::1",                    // loopback in free text
+		"010.000.000.001",          // a zero-padded dotted quad cannot be judged
+		"port:22 \u202e",           // a bidi control
+	} {
+		if _, err := CheckQuery(q); err == nil {
+			t.Errorf("%q: accepted", q)
+		}
+	}
+}
+
+// What the literal scan must not refuse.
+func TestOrdinaryQueriesStillPass(t *testing.T) {
+	for _, q := range []string{
+		`product:"OpenSSH" version:"8.2"`,
+		`http.title:"Version 1.2.3.4"`, // public-looking, so allowed
+		"ssl.cert.fingerprint:f88635017260d40b9eb417bee73737911b630e59",
+		`"12:30:00" port:443`,
+		"http.favicon.hash:-1234567",
+		"net:8.8.8.0/24 port:53",
+		"ip:2001:4860:4860::8888",
+		strings.Repeat("日", 400), // 1,200 bytes, 400 characters: within the limit
+	} {
+		if _, err := CheckQuery(q); err != nil {
+			t.Errorf("%q: refused: %v", q, err)
+		}
+	}
+	if _, err := Lex(strings.Repeat("日", MaxQueryLen+1)); err == nil {
+		t.Error("a query over 1000 characters was accepted")
+	}
+}
+
+// IPv6 is an allow-list: global unicast is 2000::/3. And a Teredo address is
+// judged on its server as well as its client.
+func TestIPv6OutsideGlobalUnicastAndTeredoServers(t *testing.T) {
+	for _, a := range []string{
+		"::ffff:0:10.0.0.1", // IPv4-translated
+		"4000::1", "5f00::1", "::1:0:0:1", "100:0:0:1::1",
+		"2001:0:a00:1::f7f7:f7f7", // Teredo server 10.0.0.1, client 8.8.8.8
+	} {
+		if _, err := Parse(a); err == nil {
+			t.Errorf("%s: accepted", a)
+		}
+	}
+	if _, err := Parse("2001:0:808:808::f7f7:f7f7"); err != nil {
+		t.Errorf("a Teredo address with public server and client was refused: %v", err)
+	}
+}

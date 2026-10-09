@@ -1,7 +1,13 @@
 package ipaddr
 
 import (
+	"net/netip"
+	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
+
+	"github.com/nlink-jp/shodan-lookup/internal/termsafe"
 )
 
 // Term is one whitespace-separated part of a Shodan query, split outside
@@ -25,8 +31,20 @@ func Lex(q string) ([]Term, error) {
 	if strings.TrimSpace(q) == "" {
 		return nil, &Error{Reason: "the query is empty"}
 	}
-	if len(q) > MaxQueryLen {
+	if utf8.RuneCountInString(q) > MaxQueryLen {
 		return nil, &Error{Reason: "the query is longer than 1000 characters"}
+	}
+	// Terms are separated by ASCII spaces and tabs only. Any other space,
+	// line break or control character is refused: what Shodan reads as a
+	// separator is not documented, and a term this gate did not see as one is
+	// a term it did not check.
+	for _, r := range q {
+		if r == ' ' || r == '\t' {
+			continue
+		}
+		if unicode.IsSpace(r) || unicode.IsControl(r) || termsafe.Obeyed(r) || !utf8.ValidRune(r) || r == utf8.RuneError {
+			return nil, &Error{Reason: "the query holds a line break, a control character or a space other than an ASCII space or tab; separate terms with spaces"}
+		}
 	}
 	var terms []string
 	var cur strings.Builder
@@ -36,7 +54,7 @@ func Lex(q string) ([]Term, error) {
 		case r == '"':
 			inQuote = !inQuote
 			cur.WriteRune(r)
-		case !inQuote && (r == ' ' || r == '\t' || r == '\n' || r == '\r'):
+		case !inQuote && (r == ' ' || r == '\t'):
 			if cur.Len() > 0 {
 				terms = append(terms, cur.String())
 				cur.Reset()
@@ -96,12 +114,20 @@ func unquote(v string) string {
 	return v
 }
 
-// CheckQuery refuses a query whose ip: or net: values are not publicly
-// routable, and returns its terms for the caller's own checks (filter names,
-// plan restrictions). Values may be comma-separated lists. A value of these
-// two filters that cannot be parsed is refused too: what cannot be checked is
-// not sent. Names inside hostname: or org: cannot be judged by their spelling;
-// that residual is documented, not guessed at.
+// CheckQuery refuses a query that would send a non-public address, and
+// returns its terms for the caller's own checks (filter names, plan
+// restrictions). Two checks:
+//
+//   - ip: and net: values (comma-separated lists allowed) must parse and be
+//     public; a value that cannot be parsed is refused, since what cannot be
+//     checked is not sent.
+//   - Every address literal anywhere in the query — free text, quoted text,
+//     another filter's value, a prefix written without net: — is judged too.
+//     Checking only terms that start with ip: let +ip:10.0.0.1, (ip:…) and
+//     hostname:10.0.0.1 through.
+//
+// Names (hostname:intranet.example) cannot be judged by their spelling; that
+// residual is documented, not guessed at.
 func CheckQuery(q string) ([]Term, error) {
 	terms, err := Lex(q)
 	if err != nil {
@@ -123,5 +149,68 @@ func CheckQuery(q string) ([]Term, error) {
 			}
 		}
 	}
+	if err := checkLiterals(q); err != nil {
+		return nil, err
+	}
 	return terms, nil
+}
+
+// ipv4Literal finds every dotted quad anywhere in a query, glued to a word or
+// not (hostname:10.0.0.1, e10.0.0.1). ipv6Literal finds runs an IPv6 address
+// can be written with; a run is tried whole and from each colon on, because a
+// filter name's last letters can be hex (hostname: ends in "e:").
+var (
+	ipv4Literal = regexp.MustCompile(`[0-9]{1,3}(?:\.[0-9]{1,3}){3}`)
+	ipv6Literal = regexp.MustCompile(`[0-9A-Fa-f:.%]*:[0-9A-Fa-f:.%]*`)
+)
+
+func checkLiterals(q string) error {
+	for _, cand := range ipv4Literal.FindAllString(q, -1) {
+		addr, err := netip.ParseAddr(cand)
+		if err != nil {
+			return &Error{Input: cand, Reason: "looks like an IPv4 address that cannot be checked (a zero-padded or out-of-range octet), so it is not sent"}
+		}
+		if c, via := Classify(addr); c != "" {
+			return refused(cand, c, via)
+		}
+	}
+	for _, run := range ipv6Literal.FindAllString(q, -1) {
+		// The first candidate that reads as an address is the address: the
+		// tail of a public address (4860::8888 inside 2001:4860:4860::8888)
+		// is not another one.
+		for _, cand := range v6Candidates(run) {
+			addr, err := netip.ParseAddr(cand)
+			if err != nil || !addr.Is6() {
+				continue // not an address: a time, a fingerprint, filter:value
+			}
+			if strings.Contains(cand, "%") {
+				return &Error{Input: cand, Reason: "is a zoned address, which names an interface on this machine"}
+			}
+			if c, via := Classify(addr.Unmap()); c != "" {
+				return refused(cand, c, via)
+			}
+			break
+		}
+	}
+	return nil
+}
+
+// v6Candidates is the run itself and every suffix that starts at a colon,
+// longest first, each also without trailing sentence punctuation.
+func v6Candidates(run string) []string {
+	var out []string
+	add := func(c string) {
+		out = append(out, c, strings.TrimRight(c, "."))
+	}
+	add(run)
+	for i := 0; i < len(run); i++ {
+		if run[i] == ':' && i+1 < len(run) {
+			add(run[i+1:])
+			if i+2 < len(run) && run[i+1] == ':' {
+				continue
+			}
+			add(run[i:]) // keep a leading "::"
+		}
+	}
+	return out
 }
