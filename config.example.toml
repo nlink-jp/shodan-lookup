@@ -1,0 +1,81 @@
+# shodan-lookup configuration — copy to ~/.config/shodan-lookup/config.toml
+#
+# Every setting except the API key is optional; the values shown are the
+# built-in defaults. Precedence is: flag > environment variable > this file >
+# built-in default. A section or key not listed here is an error, and so is a
+# key set to "" and a number outside its range.
+#
+# This file holds a credential. Keep it out of version control (the repository
+# .gitignore already excludes config.toml) and readable only by you
+# (chmod 600) — the key carries your Shodan account's authority, and every
+# query made with it is recorded against your account.
+
+[api]
+# Shodan API key (REQUIRED for every query). Membership or above; find it at
+# https://account.shodan.io. Write it here, under [api] — a bare
+# `api_key = "..."` line outside a section is refused.
+# The SHODAN_LOOKUP_API_KEY environment variable overrides this value, and
+# SHODAN_API_KEY is also accepted.
+#key = "YOUR-SHODAN-API-KEY"
+
+# API root. Override only to point at a test server. It must be https (the
+# key travels in every request's query string); plain http is accepted only
+# on loopback.
+# The SHODAN_LOOKUP_BASE_URL environment variable overrides this value.
+# base_url = "https://api.shodan.io"
+
+[query]
+# Services a host lookup lists before the rest are counted (1-500).
+# The SHODAN_LOOKUP_DEFAULT_SERVICES environment variable overrides this value.
+# default_services = 50
+
+# Inferred CVEs a host lookup lists, highest CVSS first, before the rest are
+# counted (1-500).
+# The SHODAN_LOOKUP_DEFAULT_VULNS environment variable overrides this value.
+# default_vulns = 25
+
+# Bytes of each service's banner in the compact answer, counted after
+# escaping (64-16384). The whole banner is always reachable section by section.
+# The SHODAN_LOOKUP_BANNER_BYTES environment variable overrides this value.
+# banner_bytes = 512
+
+[search]
+# Query credits a search must leave untouched (0 or more). A search that
+# would take the remainder below this is refused before it is sent.
+# Membership grants 100 query credits a month.
+# The SHODAN_LOOKUP_CREDIT_FLOOR environment variable overrides this value.
+# credit_floor = 20
+
+[cache]
+# Freshness windows, in hours (0 to 8784). 0 turns caching off for that kind
+# of answer. Windows are applied when an entry is read, so lowering one
+# expires entries already on disk. Your plan and remaining credits are never
+# cached, and neither is an IP Shodan has not observed.
+# The SHODAN_LOOKUP_HOST_TTL_HOURS environment variable overrides this value.
+# host_ttl_hours = 12
+# The SHODAN_LOOKUP_COUNT_TTL_HOURS environment variable overrides this value.
+# count_ttl_hours = 1
+# Long on purpose: a filtered search costs a query credit, and the same
+# question should not spend a second one.
+# The SHODAN_LOOKUP_SEARCH_TTL_HOURS environment variable overrides this value.
+# search_ttl_hours = 24
+
+# Cache directory. Defaults to $XDG_CACHE_HOME/shodan-lookup, else
+# ~/.cache/shodan-lookup. Entry names are hashes, so the IPs and queries you
+# looked up do not appear in a directory listing.
+# The SHODAN_LOOKUP_CACHE_DIR environment variable overrides this value.
+# dir = "~/.cache/shodan-lookup"
+
+[network]
+# Timeout per HTTPS exchange, in seconds (above 0, at most 3600).
+# The SHODAN_LOOKUP_TIMEOUT_SECONDS environment variable overrides this value.
+# timeout_seconds = 30
+
+[limits]
+# Least time between two requests from this process, in milliseconds.
+# Shodan documents one request per second on every plan; the default is half
+# that rate because the limit is per key and the pacing is per process — a
+# CLI loop and several agent runtimes' MCP servers share one key without
+# seeing each other.
+# The SHODAN_LOOKUP_MIN_INTERVAL_MS environment variable overrides this value.
+# min_interval_ms = 2000
