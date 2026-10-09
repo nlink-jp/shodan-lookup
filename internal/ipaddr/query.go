@@ -164,46 +164,96 @@ var (
 	ipv6Run     = regexp.MustCompile(`[0-9A-Fa-f:.%]*:[0-9A-Fa-f:.%]*`)
 )
 
-func checkLiterals(q string, terms []Term) error {
-	for _, cand := range ipv4Literal.FindAllString(q, -1) {
-		addr, err := netip.ParseAddr(cand)
-		if err != nil {
-			return &Error{Input: cand, Reason: "looks like an IPv4 address that cannot be checked (a zero-padded or out-of-range octet), so it is not sent"}
-		}
-		if c, via := Classify(addr); c != "" {
-			return refused(cand, c, via)
-		}
-	}
+func checkLiterals(_ string, terms []Term) error {
 	for _, t := range terms {
-		// Both the term as written and its value: fe80::1 lexes as a filter
-		// named fe80, while hostname:fe80::1 needs its name removed.
-		for _, run := range append(ipv6Run.FindAllString(t.Raw, -1), ipv6Run.FindAllString(t.Value, -1)...) {
-			for _, cand := range v6Candidates(run) {
+		// version: holds release numbers; 10.2.0.4 there is a version, not an
+		// address (measured as a false refusal in the pre-release review).
+		if strings.ToLower(t.Filter) != "version" {
+			for _, cand := range ipv4Literal.FindAllString(t.Raw, -1) {
 				addr, err := netip.ParseAddr(cand)
-				if err != nil || !addr.Is6() {
-					continue // not an address: a time, a colon-separated fingerprint
+				if err != nil {
+					return &Error{Input: cand, Reason: "looks like an IPv4 address that cannot be checked (a zero-padded or out-of-range octet), so it is not sent"}
 				}
-				if strings.Contains(cand, "%") {
-					return &Error{Input: cand, Reason: "is a zoned address, which names an interface on this machine"}
-				}
-				if c, via := Classify(addr.Unmap()); c != "" {
+				if c, via := Classify(addr); c != "" {
 					return refused(cand, c, via)
 				}
-				break
+			}
+		}
+		// Both the term as written and its value: fe80::1 lexes as a filter
+		// named fe80, while hostname:fe80::1 needs its name removed.
+		for _, run := range ipv6Run.FindAllString(t.Raw, -1) {
+			if err := checkV6Run(run, true); err != nil {
+				return err
+			}
+		}
+		// A value is judged on the internal classes only: the lexer reads
+		// 2001:4860::1 as a "filter" 2001 with the value 4860::1, which is not
+		// an address of its own. ip: and net: values have their strict check
+		// in CheckQuery.
+		for _, run := range ipv6Run.FindAllString(t.Value, -1) {
+			if err := checkV6Run(run, false); err != nil {
+				return err
 			}
 		}
 	}
 	return nil
 }
 
+// internalClasses are what a part of a longer run is refused for: classes
+// that name somebody's internal network. A part outside 2000::/3 is not
+// refused — the tail of a public address (4860::8888 inside
+// 2001:4860:4860::8888) is in no class worth refusing.
+var internalClasses = map[Class]bool{
+	ClassPrivate: true, ClassLoopback: true, ClassLinkLocal: true, ClassSiteLocal: true, ClassUniqueLocal: true,
+}
+
+// checkV6Run judges one run of address characters. The run as a whole — with
+// trailing punctuation and a single leading colon removed — is judged on
+// every class when it reads as an address (on the internal classes only when
+// everyClass is false). Every part that starts right
+// after a single colon is judged too, on the internal classes: an address
+// glued to a word or a number ("facade:fd00::1", "2024:fd00::1") is still the
+// address.
+func checkV6Run(run string, everyClass bool) error {
+	for _, cand := range v6Candidates(run) {
+		addr, err := netip.ParseAddr(cand)
+		if err != nil || !addr.Is6() {
+			continue
+		}
+		if strings.Contains(cand, "%") {
+			return &Error{Input: cand, Reason: "is a zoned address, which names an interface on this machine"}
+		}
+		if c, via := Classify(addr.Unmap()); c != "" && (everyClass || internalClasses[c]) {
+			return refused(cand, c, via)
+		}
+		break
+	}
+	for i := 0; i+1 < len(run); i++ {
+		if run[i] != ':' || run[i+1] == ':' || (i > 0 && run[i-1] == ':') {
+			continue
+		}
+		part := strings.TrimRight(run[i+1:], ".:")
+		addr, err := netip.ParseAddr(part)
+		if err != nil || !addr.Is6() {
+			continue
+		}
+		if c, via := Classify(addr.Unmap()); internalClasses[c] {
+			return refused(part, c, via)
+		}
+	}
+	return nil
+}
+
 // v6Candidates is the run as found, without a single leading colon left by a
-// prefix such as +ip: or (ip:, and without trailing sentence punctuation. A
-// run is never cut further: a colon-separated fingerprint holds eight-group
-// stretches that read as addresses and are not.
+// prefix such as +ip: or (ip:, and without trailing punctuation ("fd00::1:"
+// in "connect to fd00::1: refused"). The whole run is judged on every class;
+// its parts only on the internal ones (checkV6Run), because a
+// colon-separated fingerprint holds eight-group stretches that read as
+// addresses outside 2000::/3 and are not.
 func v6Candidates(run string) []string {
-	out := []string{run, strings.TrimRight(run, ".")}
+	out := []string{run, strings.TrimRight(run, "."), strings.TrimRight(run, ".:")}
 	if strings.HasPrefix(run, ":") && !strings.HasPrefix(run, "::") {
-		out = append(out, run[1:], strings.TrimRight(run[1:], "."))
+		out = append(out, run[1:], strings.TrimRight(run[1:], "."), strings.TrimRight(run[1:], ".:"))
 	}
 	return out
 }

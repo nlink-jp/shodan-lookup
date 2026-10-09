@@ -269,3 +269,34 @@ func TestIPv6OutsideGlobalUnicastAndTeredoServers(t *testing.T) {
 		t.Errorf("a Teredo address with public server and client was refused: %v", err)
 	}
 }
+
+// From the pre-release verification (M4, L2).
+func TestIPv6GluedOrPunctuatedIsStillJudged(t *testing.T) {
+	for _, q := range []string{
+		`http.html:"connect to fd00::1: connection refused"`,
+		"fe80::1:",
+		`"fe80::1:"`,
+		`http.html:"facade:fd00::1"`,
+		`http.html:"2024:fd00::1"`,
+		`http.html:"12345:fd00::1"`,
+		`http.html:"x 2001:4860::1:fe80::1"`,
+	} {
+		if _, err := CheckQuery(q); err == nil {
+			t.Errorf("%q: accepted", q)
+		}
+	}
+	for _, q := range []string{
+		"ip:2001:4860:4860::8888",                    // the tail of a public address is not another one
+		"2001:4860::1",                               // nor is ::1 inside it
+		"ssl.cert.fingerprint:" + strings.TrimSuffix(strings.Repeat("AB:", 20), ":"),
+		`"12:30:00"`,
+		"product:Oracle version:10.2.0.4", // a version, not an address
+	} {
+		if _, err := CheckQuery(q); err != nil {
+			t.Errorf("%q: refused: %v", q, err)
+		}
+	}
+	if _, err := CheckQuery(`http.title:"build 10.2.0.4"`); err == nil {
+		t.Error("an address-shaped string outside version: is no longer judged")
+	}
+}
