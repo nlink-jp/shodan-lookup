@@ -19,6 +19,7 @@ const (
 	mcpMaxListLimit = 50
 	mcpDefaultList  = 20
 	mcpMaxFacetN    = 100
+	mcpMaxFacets    = 5 // breakdowns per call
 	mcpMaxPorts     = 50
 	mcpMaxNames     = 50 // hostnames and domains each
 	// softBudget is where lookup_host starts dropping services rather than
@@ -270,7 +271,45 @@ func (s *Server) countServices(ctx context.Context, raw json.RawMessage) (any, e
 	if err != nil {
 		return nil, err
 	}
-	return s.Eng.CountServices(ctx, a.Query, specs, a.Refresh)
+	res, err := s.Eng.CountServices(ctx, a.Query, specs, a.Refresh)
+	if err != nil {
+		return nil, err
+	}
+	out := &compactCount{Count: res, Omitted: map[string]int{}}
+	capStrings(out)
+	thinFacets(out, res.Facets, out.Omitted)
+	if out.Omitted["facet_values"] > 0 {
+		res.Notes = append(res.Notes, "the lowest facet values were left out to fit the response (omitted.facet_values); ask for fewer facets or a smaller N")
+	} else {
+		out.Omitted = nil
+	}
+	return out, nil
+}
+
+// compactCount is count_services' answer, with facet values thinned to fit.
+type compactCount struct {
+	*engine.Count
+	Omitted map[string]int `json:"omitted,omitempty"`
+}
+
+// thinFacets halves the longest breakdown, from its tail, until out fits or
+// every breakdown is down to one value, counting what it dropped.
+func thinFacets(out any, facets []engine.Facet, omitted map[string]int) {
+	for over(out) {
+		longest := -1
+		for i := range facets {
+			if len(facets[i].Values) > 1 && (longest < 0 || len(facets[i].Values) > len(facets[longest].Values)) {
+				longest = i
+			}
+		}
+		if longest < 0 {
+			return
+		}
+		v := facets[longest].Values
+		keep := len(v) / 2
+		omitted["facet_values"] += len(v) - keep
+		facets[longest].Values = v[:keep]
+	}
 }
 
 func invalidArg(msg string) error { return &argError{code: CodeInvalidArgument, msg: msg} }
@@ -390,23 +429,30 @@ func (s *Server) searchServices(ctx context.Context, raw json.RawMessage) (any, 
 	if err != nil {
 		return nil, err
 	}
-	out := &compactSearch{Search: res}
+	// The credits are spent by now: the answer must fit, never be withheld.
+	// Facet values go first (their tails are the least informative), then
+	// rows, each counted.
+	out := &compactSearch{Search: res, Omitted: map[string]int{}}
 	capStrings(out)
-	dropped := 0
+	thinFacets(out, res.Facets, out.Omitted)
 	for over(out) && len(res.Rows) > 1 {
 		drop := (len(res.Rows) + 1) / 2
-		dropped += drop
+		out.Omitted["rows"] += drop
 		res.Rows = res.Rows[:len(res.Rows)-drop]
 	}
-	if dropped > 0 {
-		out.Omitted = map[string]int{"rows": dropped}
-		res.Notes = append(res.Notes, "rows were left out to fit the response (omitted.rows); the credits are spent — the CLI's search --json holds the whole page")
+	if out.Omitted["rows"] > 0 || out.Omitted["facet_values"] > 0 {
+		res.Notes = append(res.Notes, "parts of the page were left out to fit the response (omitted); the credits are spent — the CLI's search --json holds the whole page, and a repeat of this search is served from the cache")
+	} else {
+		out.Omitted = nil
 	}
 	return out, nil
 }
 
 // parseFacets reads MCP facet specs, held to the MCP bound.
 func parseFacets(in []string) ([]engine.FacetSpec, error) {
+	if len(in) > mcpMaxFacets {
+		return nil, invalidArg(fmt.Sprintf("at most %d facets per call here (the CLI takes more)", mcpMaxFacets))
+	}
 	specs := make([]engine.FacetSpec, 0, len(in))
 	for _, f := range in {
 		spec, err := engine.ParseFacet(f)

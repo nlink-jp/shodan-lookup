@@ -68,7 +68,9 @@ And these are easy to misread:
 - **`omitted`** counts what was left out, and appears only when something
   was: on lookup_host `services` (past the default, or thinned to fit),
   `services_not_asked_for` (with `ports`), `banners_shortened`, `vulns`,
-  `hostnames` and `domains` (50 each); on get_history `variants` and `ports`.
+  `hostnames` and `domains` (50 each); on get_history `variants` and `ports`;
+  on count_services and search_services `facet_values`, and on
+  search_services `rows`.
   `get_service`, `ports` and a port's observations reach all of it.
 
 ## Tools
@@ -131,9 +133,11 @@ Arguments:
   unknown one is refused, because Shodan would read it as free text and match
   nothing. `vuln` and `tag` are refused as `plan_restricted`. Quote text that
   contains a colon. At most 1000 characters.
-- `facets`: breakdowns as `"name"` or `"name:N"`, N 1-100 (default 10), e.g.
-  `"org:5"`, `"ip:20"`. Names are checked against Shodan's facet list —
-  Shodan drops an unknown one without saying so.
+- `facets`: up to 5 breakdowns as `"name"` or `"name:N"`, N 1-100 (default
+  10), e.g. `"org:5"`, `"ip:20"`. Names are checked against Shodan's facet
+  list — Shodan drops an unknown one without saying so. When the values do
+  not fit the response, the lowest are left out and counted in
+  `omitted.facet_values`.
 - `refresh`: bypass the local cache (counts are cached 1 hour by default).
 
 The answer: `query`, `unit` (always `services`), `total`, `facets[]` (each
@@ -198,7 +202,10 @@ never more than 1 per call). Arguments:
 
 - `query` (required): as for `count_services`, checked the same way before
   anything is sent.
-- `facets`: as for `count_services` (N 1-100).
+  A dotted quad inside a `version:` value is taken as a release number, not
+  an address; anywhere else an address-shaped string that is not public is
+  refused (`http.title:"build 10.2.0.4"` is refused, for one).
+- `facets`: as for `count_services` (N 1-100, at most 5 facets).
 - `page`: 1-10, 100 rows each (default 1).
 - `refresh`: search again instead of serving the cached page (cached 24 hours
   by default) — **this spends credits again**.
@@ -252,6 +259,13 @@ This manual. Takes no arguments.
 
 Every tool error is a result with `isError: true` whose text is
 `{"code": ..., "message": ...}`. Branch on `code`; the message is for people.
+
+**A failed `search_services` may already have been charged.** When its
+message says credits were spent, retrying spends again — whatever the table
+below says about retrying. Check `get_quota` first, and prefer
+`count_services`, which is free. A failure that was not charged (the message
+names no spend) does not stop searching and may be retried as the table
+says.
 
 | code | meaning | what to do |
 |---|---|---|

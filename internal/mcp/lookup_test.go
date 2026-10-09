@@ -105,6 +105,13 @@ func (f *fakeEngine) SearchServices(_ context.Context, q engine.SearchQuery, _ b
 	}
 	one := 1
 	res.Credits = &engine.Credits{Predicted: 1, Before: 50, After: &one, Spent: &one, Floor: 20}
+	for _, spec := range q.Facets {
+		f := engine.Facet{Name: spec.Name, Requested: spec.N}
+		for i := 0; i < spec.N; i++ {
+			f.Values = append(f.Values, engine.FacetValue{Value: strings.Repeat("v", 900), Count: 1000 - i})
+		}
+		res.Facets = append(res.Facets, f)
+	}
 	return res, nil
 }
 
@@ -480,5 +487,27 @@ func TestCreditCodesPassThrough(t *testing.T) {
 		if _, text, isErr := call(t, s, ToolSearchServices, `{"query":"port:443"}`); !isErr || !strings.Contains(text, `"code":"`+code+`"`) {
 			t.Errorf("%s: %s", code, text)
 		}
+	}
+}
+
+// From the pre-release verification (M1): five long facets of 100 values each
+// must not get a paid-for page withheld; the values are thinned and counted.
+func TestLargeFacetsAreThinnedNotWithheld(t *testing.T) {
+	eng := &fakeEngine{rows: 10}
+	m, text, isErr := call(t, lookupServer(t, eng), ToolSearchServices,
+		`{"query":"port:443","facets":["http.title:100","http.component:100","ssl.cert.subject.cn:100","org:100","isp:100"]}`)
+	if isErr {
+		t.Fatalf("withheld after the credits were spent: %.200s", text)
+	}
+	if len(text) > maxResultBytes || m["credits"] == nil {
+		t.Errorf("result %d bytes, credits %v", len(text), m["credits"])
+	}
+	om, _ := m["omitted"].(map[string]any)
+	if om["facet_values"] == nil {
+		t.Errorf("thinned facet values are not counted: %v", m["omitted"])
+	}
+	if _, text, isErr := call(t, lookupServer(t, &fakeEngine{rows: 1}), ToolSearchServices,
+		`{"query":"port:443","facets":["a","b","c","d","e","f"]}`); !isErr || !strings.Contains(text, CodeInvalidArgument) {
+		t.Errorf("six facets were accepted: %.200s", text)
 	}
 }
