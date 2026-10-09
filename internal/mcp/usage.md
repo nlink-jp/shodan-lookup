@@ -30,6 +30,7 @@ credited to Shodan. Every result names its source in `provenance`.
 | What does this IP expose — ports, products, certificates, inferred CVEs? | `lookup_host` |
 | Show me one service of it in full: the banner, the page, the certificate, the CVE summaries | `get_service` |
 | How many services match this query, and which IPs / orgs / countries have the most? | `count_services` |
+| What did it expose over time — when did a port first appear, when did its certificate or product change? | `get_history` |
 | How many query credits are left, and does the key work? | `get_quota` |
 
 A typical pivot: `lookup_host` → a certificate's `sha1` or a
@@ -132,6 +133,44 @@ Arguments:
 The answer: `query`, `unit` (always `services`), `total`, `facets[]` (each
 `name`, `requested`, `values[]` of `value` and `count`), `provenance`,
 `notes`.
+
+### get_history
+
+What one IP exposed over time, from Shodan's banner history (credit-free,
+measured). Arguments:
+
+- `ip` (required).
+- `port`: also list this port's observations, newest first — each with
+  `timestamp`, `product`, `version`, `title`, `cert_sha1`,
+  `banner_first_line` and `banner_chars`.
+- `transport`: `tcp` or `udp`; required when the port has history on both.
+- `offset`, `limit`: page the observations (limit 1-50, default 20); they
+  apply only with `port`.
+- `refresh`: fetch the history again (cached 12 hours by default).
+
+The answer: `window` (`oldest`, `newest`, `banners`, `cap`, `capped`,
+`dominated_by`), `ports[]` (each `port`, `transport`, `observations`,
+`first_seen`, `last_seen`, `variant_count` and `variants[]` — each variant a
+distinct `product`, `version`, `title` and `cert_sha1` with its
+`first_seen`, `last_seen` and `observations`), `observations` when a port was
+asked for, `provenance`, `notes`, and `omitted` when variants were left out
+(at most 20 per port, the most recent kept).
+
+How to read it:
+
+- **Shodan returns only the latest 1,000 banners.** When `window.capped` is
+  true, nothing before `window.oldest` can be read, and a port's
+  `first_seen` is its first sighting inside the window — not when it opened.
+  One chatty port can fill the window (973 of 1,000 on 53/udp was measured);
+  `dominated_by` names it.
+- **Below the cap, completeness is unknown**: Shodan does not document how
+  long it keeps history.
+- **A new variant is a change**: a different product, version, page title or
+  certificate. Its `first_seen` is when Shodan first saw that combination.
+- **A 404 is cross-checked**: Shodan does not return the history of some
+  large hosts that do have services (measured). That is `upstream_error`
+  saying so — the current record is still available through `lookup_host` —
+  and never `not_indexed`.
 
 ### get_quota
 

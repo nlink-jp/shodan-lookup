@@ -27,9 +27,9 @@ IP アドレスがインターネットから見て何を晒しているか — 
 
 ## 状況
 
-[RFP](docs/ja/shodan-lookup-rfp.ja.md) の Phase 1 を実装済みです: `host`・
-`service`・`count`・`quota` と、MCP ツール `lookup_host`・`get_service`・
-`count_services`・`get_quota`。クレジットを消費する検索（Phase 2）はこの
+[RFP](docs/ja/shodan-lookup-rfp.ja.md) の Phase 1 に履歴を加えて実装済みです:
+`host`・`service`・`count`・`history`・`quota` と、MCP ツール `lookup_host`・
+`get_service`・`count_services`・`get_history`・`get_quota`。クレジットを消費する検索（Phase 2）はこの
 ビルドには入っていません。未リリースです。
 
 ## 必要なもの
@@ -83,6 +83,7 @@ TTL を 0 にすると、その種類の答えはキャッシュしません。
 shodan-lookup host <IP>...             ホストの開放ポート・製品・証明書・推定 CVE
 shodan-lookup service <IP> <PORT>      ホストの 1 サービスを区画ごとに全量まで
 shodan-lookup count <QUERY>            Shodan のクエリに一致するサービスの数と内訳
+shodan-lookup history <IP>             時間を通じて何を晒していたか（ポートごとに、各変化がいつ見えたか）
 shodan-lookup quota                    プランと残りのクエリクレジット（常に最新）
 shodan-lookup cache status|clear       結果キャッシュの確認・削除
 shodan-lookup mcp                      ローカル MCP サーバーとして起動（stdio）
@@ -99,6 +100,8 @@ shodan-lookup host 1.2.3.4 --raw                          # Shodan の文書そ�
 shodan-lookup service 1.2.3.4 443 --section ssl_cert      # 証明書の全体
 shodan-lookup service 1.2.3.4 53 --transport udp --section banner
 shodan-lookup count 'port:3389 country:JP' --facet org:5 --facet ip:20
+shodan-lookup history 1.2.3.4                             # ポート・製品・タイトル・証明書がいつ変わったか
+shodan-lookup history 1.2.3.4 --port 443 --limit 20       # そのポートの観測を新しい順に
 shodan-lookup quota
 ```
 
@@ -118,6 +121,11 @@ shodan-lookup quota
   Shodan は知らない条件を文字列として扱って 0 件にし、知らない内訳は黙って
   捨てるからです。`vuln` と `tag` は Membership では拒否します。制限がエラーでは
   なく、不自然に少ない件数として返ってくるためです。
+- **履歴は Shodan が返す最新の 1,000 バナー**です。上限に達していれば、
+  それより前は読めません。ポートの最初の観測は、その窓の中での最初であって、
+  開いた時点ではありません。騒がしい 1 つのポートが窓を埋めることがあり、
+  答えはそのポートを名指しします。履歴の 404 もホスト照会と同じく裏を取ります
+  （Shodan は、サービスを持つ大きなホストの履歴を返さないことがあります）。
 - **時刻は UTC** です。証明書の `expired` は、照会した時点で計算します。
 - **ホスト照会は API キーを検査しません**（実測）。誤ったキーでもホストの記録は
   返ります。キーの誤りは `quota` と `count` で分かります。
@@ -137,7 +145,7 @@ API キーが無いか拒否された。
 }
 ```
 
-ツール: `lookup_host`・`get_service`・`count_services`・`get_quota`・
+ツール: `lookup_host`・`get_service`・`count_services`・`get_history`・`get_quota`・
 `cache_status`・`get_usage`。最初に `get_usage` を呼んでください。全体の
 リファレンスと、エラーからの回復手順の表を返します。`lookup_host` は応答の
 予算内で答えます。既定を超えたサービス・バナー・CVE は `omitted` に件数として

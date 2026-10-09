@@ -10,6 +10,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 - `host`, `service`, `count`, `quota` and the MCP tools `lookup_host`,
   `get_service`, `count_services`, `get_quota` (RFP Phase 1).
+- `history` and the MCP tool `get_history`: per port, the first and last
+  sighting and each variant (product, version, page title, certificate
+  SHA-1) with when it was seen, inside a stated window — Shodan returns only
+  the latest 1,000 banners, and the answer says when that cap was reached
+  and which port filled it. A history 404 is cross-checked with a free
+  count. `history --raw` prints every historical banner.
   - Internal addresses are refused before anything is sent, in IP arguments
     and in `ip:` / `net:` query values (`internal/ipaddr`).
   - The API key travels only in the query string and never appears in an

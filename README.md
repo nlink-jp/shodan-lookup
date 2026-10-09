@@ -28,9 +28,10 @@ refused before anything is sent.
 
 ## Status
 
-Phase 1 of the [RFP](docs/en/shodan-lookup-rfp.md) is implemented: `host`,
-`service`, `count` and `quota`, and the MCP tools `lookup_host`,
-`get_service`, `count_services` and `get_quota`. The credit-spending search
+Phase 1 of the [RFP](docs/en/shodan-lookup-rfp.md) is implemented, with
+history added: `host`, `service`, `count`, `history` and `quota`, and the MCP
+tools `lookup_host`, `get_service`, `count_services`, `get_history` and
+`get_quota`. The credit-spending search
 (Phase 2) is not part of this build. Not released yet.
 
 ## Requirements
@@ -84,6 +85,7 @@ TTL of 0 turns caching off for that kind of answer.
 shodan-lookup host <IP>...             Open ports, products, certificates and inferred CVEs of a host
 shodan-lookup service <IP> <PORT>      One service of a host in full, section by section
 shodan-lookup count <QUERY>            How many services match a Shodan query, with breakdowns
+shodan-lookup history <IP>             What it exposed over time: per port, when each variant was seen
 shodan-lookup quota                    Your plan and remaining query credits (always live)
 shodan-lookup cache status|clear       Inspect or clear the result cache
 shodan-lookup mcp                      Run as a local MCP server (stdio)
@@ -100,6 +102,8 @@ shodan-lookup host 1.2.3.4 --raw                          # Shodan's own documen
 shodan-lookup service 1.2.3.4 443 --section ssl_cert      # the whole certificate
 shodan-lookup service 1.2.3.4 53 --transport udp --section banner
 shodan-lookup count 'port:3389 country:JP' --facet org:5 --facet ip:20
+shodan-lookup history 1.2.3.4                             # when ports, products, titles, certificates changed
+shodan-lookup history 1.2.3.4 --port 443 --limit 20       # that port's observations, newest first
 shodan-lookup quota
 ```
 
@@ -119,6 +123,11 @@ How to read the answers:
   sending: Shodan would read an unknown filter as text and match nothing, and
   drop an unknown facet silently. `vuln` and `tag` are refused on Membership —
   the restriction comes back as a misleadingly low count, not an error.
+- **History is Shodan's latest 1,000 banners.** When capped, nothing earlier
+  can be read, and a port's first sighting is the first inside that window,
+  not when it opened; one chatty port can fill the window, and the answer
+  names it. A history 404 is cross-checked like a host 404 — Shodan does not
+  return the history of some large hosts that do have services.
 - **Times are UTC**; a certificate's `expired` is computed when you ask.
 - **Host lookups do not check the API key** (measured): a wrong key still
   returns host records. `quota` and `count` are where it shows.
@@ -138,7 +147,7 @@ configuration, or a missing or refused API key.
 }
 ```
 
-Tools: `lookup_host`, `get_service`, `count_services`, `get_quota`,
+Tools: `lookup_host`, `get_service`, `count_services`, `get_history`, `get_quota`,
 `cache_status`, `get_usage`. Call `get_usage` first: it is the full reference
 and the error-recovery table. `lookup_host` answers within a response budget
 — services, banners and CVEs past the defaults are counted in `omitted`, and

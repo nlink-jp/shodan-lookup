@@ -257,3 +257,61 @@ func (s *Server) countServices(ctx context.Context, raw json.RawMessage) (any, e
 }
 
 func invalidArg(msg string) error { return &argError{code: CodeInvalidArgument, msg: msg} }
+
+// mcpMaxVariants is how many variants get_history lists per port; the rest
+// are counted.
+const mcpMaxVariants = 20
+
+// compactHistory is get_history's answer: the engine's history with the
+// variants per port capped and the cap counted.
+type compactHistory struct {
+	*engine.History
+	Omitted map[string]int `json:"omitted,omitempty"`
+}
+
+type historyArgs struct {
+	IP        string `json:"ip"`
+	Port      int    `json:"port"`
+	Transport string `json:"transport"`
+	Offset    int    `json:"offset"`
+	Limit     *int   `json:"limit"`
+	Refresh   bool   `json:"refresh"`
+}
+
+func (s *Server) getHistory(ctx context.Context, raw json.RawMessage) (any, error) {
+	var a historyArgs
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	if a.IP == "" {
+		return nil, invalidArg("ip is required")
+	}
+	limit := mcpDefaultList
+	if a.Limit != nil {
+		if *a.Limit < 1 || *a.Limit > mcpMaxListLimit {
+			return nil, invalidArg(fmt.Sprintf("limit must be between 1 and %d", mcpMaxListLimit))
+		}
+		limit = *a.Limit
+	}
+	if a.Port == 0 && (a.Transport != "" || a.Offset != 0 || a.Limit != nil) {
+		return nil, invalidArg("transport, offset and limit apply to one port's observations; pass port")
+	}
+	h, err := s.Eng.GetHistory(ctx, engine.HistoryQuery{IP: a.IP, Port: a.Port, Transport: a.Transport, Offset: a.Offset, Limit: limit}, a.Refresh)
+	if err != nil {
+		return nil, err
+	}
+	out := &compactHistory{History: h}
+	dropped := 0
+	for i := range h.Ports {
+		if n := len(h.Ports[i].Variants); n > mcpMaxVariants {
+			// Keep the newest variants: they are what the port answers with now.
+			h.Ports[i].Variants = h.Ports[i].Variants[n-mcpMaxVariants:]
+			dropped += n - mcpMaxVariants
+		}
+	}
+	if dropped > 0 {
+		out.Omitted = map[string]int{"variants": dropped}
+		h.Notes = append(h.Notes, fmt.Sprintf("only the %d most recent variants per port are listed (variant_count is the total); pass port to page its observations", mcpMaxVariants))
+	}
+	return out, nil
+}

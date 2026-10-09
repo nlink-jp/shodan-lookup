@@ -46,22 +46,23 @@ const hostFixture = `{
 var fixedNow = time.Date(2026, 10, 9, 7, 0, 0, 0, time.UTC)
 
 type fakeUp struct {
-	mu       sync.Mutex
-	hosts    map[string]string // ip -> body
-	hostErr  map[string]error
-	totals   map[string]int // count query -> total
-	countErr error
-	countRaw map[string]string // count query+"|"+facets -> body
-	filters  []string
-	facets   []string
-	apiInfo  string
-	calls    []string
+	mu        sync.Mutex
+	hosts     map[string]string // ip -> body
+	histories map[string]string // ip -> history body
+	hostErr   map[string]error
+	totals    map[string]int // count query -> total
+	countErr  error
+	countRaw  map[string]string // count query+"|"+facets -> body
+	filters   []string
+	facets    []string
+	apiInfo   string
+	calls     []string
 }
 
 func newFake() *fakeUp {
 	return &fakeUp{
 		hosts:   map[string]string{"1.2.3.4": hostFixture},
-		hostErr: map[string]error{}, totals: map[string]int{}, countRaw: map[string]string{},
+		hostErr: map[string]error{}, totals: map[string]int{}, countRaw: map[string]string{}, histories: map[string]string{},
 		filters: []string{"port", "country", "org", "ip", "net", "http.title", "product", "vuln", "tag"},
 		facets:  []string{"port", "country", "org", "ip", "vuln"},
 		apiInfo: `{"plan": "dev", "query_credits": 97, "scan_credits": 100, "monitored_ips": 0,
@@ -101,6 +102,15 @@ func (f *fakeUp) Host(_ context.Context, ip string) (*shodan.Response, error) {
 		return nil, &shodan.Error{Code: shodan.CodeEndpoint, Status: 404, APIError: noInformation, Message: "404"}
 	}
 	return resp(b, "/shodan/host/"+ip), nil
+}
+
+func (f *fakeUp) HostHistory(_ context.Context, ip string) (*shodan.Response, error) {
+	f.record("history " + ip)
+	b, ok := f.histories[ip]
+	if !ok {
+		return nil, &shodan.Error{Code: shodan.CodeEndpoint, Status: 404, APIError: noInformation, Message: "404"}
+	}
+	return resp(b, "/shodan/host/"+ip+"?history=true"), nil
 }
 
 func (f *fakeUp) Count(_ context.Context, query, facets string) (*shodan.Response, error) {

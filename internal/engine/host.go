@@ -124,7 +124,7 @@ func (e *Engine) loadHost(ctx context.Context, ipArg string, refresh bool) (*hos
 	en, cached, err := e.fetch(ctx, cache.Key("host", ip), e.cfg.HostTTL, refresh,
 		func(ctx context.Context) (*shodan.Response, error) { return e.up.Host(ctx, ip) })
 	if err != nil {
-		return nil, e.hostError(ctx, ip, err)
+		return nil, e.hostError(ctx, ip, err, "the record")
 	}
 	var w wireHost
 	if err := json.Unmarshal(en.Body, &w); err != nil {
@@ -142,7 +142,10 @@ const (
 // from upstream failing (measured: history lookups of hosts that a count shows
 // services for), so it becomes not_indexed only when a credit-free count
 // confirms zero services. A failed confirmation is not a negative answer.
-func (e *Engine) hostError(ctx context.Context, ip string, err error) error {
+//
+// what names what was asked for ("the record", "its history"), for the
+// message when Shodan holds services but did not return it.
+func (e *Engine) hostError(ctx context.Context, ip string, err error, what string) error {
 	var se *shodan.Error
 	if !asShodan(err, &se) || se.Status != 404 {
 		return err
@@ -161,7 +164,7 @@ func (e *Engine) hostError(ctx context.Context, ip string, err error) error {
 			"Shodan answered \"no information\" for %s, and the check that would confirm it failed (%s) — this is not evidence that Shodan has not observed it", ip, shodan.Code(cerr))}
 	case n > 0:
 		return &shodan.Error{Code: shodan.CodeUpstream, Status: 404, Message: fmt.Sprintf(
-			"Shodan holds %d service(s) for %s but did not return the record (it answered \"no information\"); retry later — this is not a negative answer", n, ip)}
+			"Shodan holds %d service(s) for %s but did not return %s (it answered \"no information\"); this is not a negative answer%s", n, ip, what, retryHint(what))}
 	default:
 		return &Error{Code: CodeNotIndexed, Message: fmt.Sprintf(
 			"%s is not in Shodan's index: Shodan has not observed it (a count for ip:%s found 0 services). This is not evidence that nothing is open", ip, ip)}
@@ -341,4 +344,11 @@ func runeCount(s string) int {
 		n++
 	}
 	return n
+}
+
+func retryHint(what string) string {
+	if what == "its history" {
+		return " — measured for large hosts, whose history Shodan does not return; the current record is available through lookup_host"
+	}
+	return " — retry later"
 }

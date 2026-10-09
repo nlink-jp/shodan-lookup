@@ -38,6 +38,22 @@ func hostBody() string {
 	return string(b)
 }
 
+// A synthetic history: 443/tcp changes its title (hostile) and certificate.
+func historyBody() string {
+	var data []any
+	for i, v := range []struct{ ts, title, sha1 string }{
+		{"2026-10-07T01:00:00.000000", "Old", "aaaa"},
+		{"2026-10-08T01:00:00.000000", hostile, "bbbb"},
+		{"2026-10-09T01:00:00.000000", hostile, "bbbb"},
+	} {
+		data = append(data, map[string]any{"port": 443, "transport": "tcp", "timestamp": v.ts, "product": "ExampleServer",
+			"data": "HTTP/1.1 200 OK\r\nX: " + hostile, "_shodan": map[string]any{"module": "https"}, "http": map[string]any{"title": v.title},
+			"ssl": map[string]any{"cert": map[string]any{"fingerprint": map[string]any{"sha1": v.sha1}}}, "seq": i})
+	}
+	b, _ := json.Marshal(map[string]any{"ip_str": "1.2.3.4", "ports": []int{443}, "data": data})
+	return string(b)
+}
+
 type fakeShodan struct {
 	srv   *httptest.Server
 	hits  atomic.Int32
@@ -57,6 +73,8 @@ func newFakeShodan(t *testing.T) *fakeShodan {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case r.URL.Path == "/shodan/host/1.2.3.4" && r.URL.Query().Get("history") == "true":
+			_, _ = w.Write([]byte(historyBody()))
 		case r.URL.Path == "/shodan/host/1.2.3.4":
 			_, _ = w.Write([]byte(hostBody()))
 		case r.URL.Path == "/shodan/host/count":
@@ -367,4 +385,53 @@ func TestARefusalNamesTheInputOnce(t *testing.T) {
 	if strings.Count(errOut, "10.0.0.1") != 1 {
 		t.Errorf("the address is repeated: %s", errOut)
 	}
+}
+
+func TestHistory(t *testing.T) {
+	online(t)
+	out, errOut, code := runCLI("history", "1.2.3.4")
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	for _, want := range []string{"history 2026-10-07T01:00:00Z .. 2026-10-09T01:00:00Z  (3 banners)", "443/tcp", "2 variants", "cert aaaa", "cert bbbb", "not documented"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	assertInert(t, "history", out)
+
+	out, errOut, code = runCLI("history", "1.2.3.4", "--port", "443", "--limit", "2")
+	if code != exitOK || !strings.Contains(out, "observations, newest first (3, from 0)") || !strings.Contains(out, "more: --offset 2") {
+		t.Errorf("observations: exit %d %s\n%s", code, errOut, out)
+	}
+	assertInert(t, "history --port", out)
+
+	js, _, code := runCLI("history", "1.2.3.4", "--json")
+	var h engine.History
+	if code != exitOK || json.Unmarshal([]byte(js), &h) != nil || h.Window.Banners != 3 {
+		t.Errorf("--json: exit %d %.200s", code, js)
+	}
+	assertInert(t, "history --json", js)
+	raw, _, code := runCLI("history", "1.2.3.4", "--raw")
+	if code != exitOK || !strings.Contains(raw, `"seq": 2`) {
+		t.Errorf("--raw: exit %d %.200s", code, raw)
+	}
+	assertInert(t, "history --raw", raw)
+
+	if out, _, code := runCLI("history", "5.6.7.8"); code != exitOK || !strings.Contains(out, "not in Shodan's index") {
+		t.Errorf("unindexed: exit %d %s", code, out)
+	}
+	for _, args := range [][]string{{"history"}, {"history", "1.2.3.4", "--limit", "5"}, {"history", "1.2.3.4", "--port", "443", "--raw"}, {"history", "1.2.3.4", "--port", "0"}} {
+		if _, _, code := runCLI(args...); code != exitError {
+			t.Errorf("%v: exit %d", args, code)
+		}
+	}
+}
+
+func TestEveryHistoryFieldIsInertWhenPrinted(t *testing.T) {
+	h := &engine.History{}
+	fillStrings(reflect.ValueOf(h).Elem())
+	var out bytes.Buffer
+	printHistory(&out, forText(h))
+	assertInert(t, "printHistory", out.String())
 }

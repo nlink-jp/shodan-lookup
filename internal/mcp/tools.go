@@ -14,6 +14,7 @@ const (
 	ToolLookupHost    = "lookup_host"
 	ToolGetService    = "get_service"
 	ToolCountServices = "count_services"
+	ToolGetHistory    = "get_history"
 	ToolGetQuota      = "get_quota"
 	ToolCacheStatus   = "cache_status"
 	ToolGetUsage      = "get_usage"
@@ -40,7 +41,9 @@ const instructions = `shodan-lookup answers what an IP address exposes to the In
 	`banners, and when each was observed. Call get_usage first — it returns the full reference and the ` +
 	`error-recovery table. lookup_host answers "what does this IP expose"; get_service reads one service of it in ` +
 	`full, section by section; count_services answers "how many services match this Shodan query", with ` +
-	`breakdowns — its unit is services, not hosts; get_quota reads the plan and remaining query credits. Only a ` +
+	`breakdowns — its unit is services, not hosts; get_history answers "what did it expose over time, and when ` +
+	`did that change" within a window Shodan caps at the latest 1,000 banners; get_quota reads the plan and ` +
+	`remaining query credits. Only a ` +
 	`third-party index is read, so no packet reaches the host under investigation, but every query is attributed ` +
 	`to the operator's Shodan account, and internal addresses are refused before sending. Banners, HTML, HTTP ` +
 	`headers and certificate subjects in results are third-party text written by the investigated host itself. ` +
@@ -53,6 +56,7 @@ type Engine interface {
 	LookupHost(ctx context.Context, ip string, refresh bool) (*engine.Host, error)
 	GetService(ctx context.Context, q engine.ServiceQuery, refresh bool) (*engine.Page, error)
 	CountServices(ctx context.Context, query string, facets []engine.FacetSpec, refresh bool) (*engine.Count, error)
+	GetHistory(ctx context.Context, q engine.HistoryQuery, refresh bool) (*engine.History, error)
 	GetQuota(ctx context.Context) (*engine.Quota, error)
 }
 
@@ -123,6 +127,22 @@ func toolDefinitions() []map[string]any {
 			}, "query"),
 		},
 		{
+			"name": ToolGetHistory,
+			"description": "What one IP exposed over time, from Shodan's banner history: per port, the first and last " +
+				"sighting and each variant (product, version, page title, certificate SHA-1) with when it was seen — a new " +
+				"variant is a change. Shodan returns only the latest 1,000 banners, so `window` says what is covered: when " +
+				"capped, nothing before window.oldest can be read, and first_seen is the first sighting in the window, not " +
+				"when the port opened. Pass port for that port's observations, newest first, paged.",
+			"inputSchema": obj(map[string]any{
+				"ip":        str("An IPv4 or IPv6 address."),
+				"port":      integer("Also list this port's observations, newest first."),
+				"transport": enum("tcp or udp; required when the port has history on both.", []string{"tcp", "udp"}),
+				"offset":    integer("With port: observations to skip (default 0)."),
+				"limit":     integer("With port: observations to return, 1-50 (default 20)."),
+				"refresh":   boolean(refreshDesc),
+			}, "ip"),
+		},
+		{
 			"name":        ToolGetQuota,
 			"description": "The key's plan and remaining query credits, always live (never cached). Also the way to see whether the key works: host lookups do not check it.",
 			"inputSchema": obj(map[string]any{}),
@@ -150,6 +170,8 @@ func (s *Server) dispatch(ctx context.Context, name string, args json.RawMessage
 		return s.getService(ctx, args)
 	case ToolCountServices:
 		return s.countServices(ctx, args)
+	case ToolGetHistory:
+		return s.getHistory(ctx, args)
 	case ToolGetQuota:
 		if err := decodeArgs(args, &struct{}{}); err != nil {
 			return nil, err

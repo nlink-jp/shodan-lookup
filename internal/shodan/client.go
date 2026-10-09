@@ -149,6 +149,15 @@ func (c *Client) Host(ctx context.Context, ip string) (*Response, error) {
 	return c.get(ctx, "/shodan/host/"+url.PathEscape(ip), nil)
 }
 
+// HostHistory fetches the host's historical banners:
+// GET /shodan/host/{ip}?history=true. Credit-free on Membership (measured),
+// capped by upstream at the latest 1,000 banners, and answered with the
+// "no information" 404 for some hosts that do have data (measured on large
+// anycast hosts) — the caller cross-checks it.
+func (c *Client) HostHistory(ctx context.Context, ip string) (*Response, error) {
+	return c.get(ctx, "/shodan/host/"+url.PathEscape(ip), url.Values{"history": {"true"}})
+}
+
 // Count fetches the number of services matching a query, and facet
 // breakdowns: GET /shodan/host/count. Measured credit-free. facets is the
 // comma-separated "name:N" list, or "".

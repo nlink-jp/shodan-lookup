@@ -8,13 +8,12 @@ REST API with the operator's own API key: open ports, products and versions,
 TLS certificates, inferred CVEs, observation times. Series:
 cybersecurity-series. Module: `github.com/nlink-jp/shodan-lookup`.
 
-**Status: RFP Phase 1 (core) implemented, not released.** CLI `host`,
-`service`, `count`, `quota`, `cache`, `mcp`, `version`; MCP tools
-`lookup_host`, `get_service`, `count_services`, `get_quota`, `cache_status`,
-`get_usage`. Next: RFP Phase 2 — `parse_query` / `search_services` with the
-credit guard (credit-spending measurements first, with approval), the e2e
-suite, and the decision on `history` (RFP "Corrections from the Phase 1
-measurements" item 1).
+**Status: RFP Phase 1 (core) implemented with history added (RFP "Adding
+history"), not released.** CLI `host`, `service`, `count`, `history`,
+`quota`, `cache`, `mcp`, `version`; MCP tools `lookup_host`, `get_service`,
+`count_services`, `get_history`, `get_quota`, `cache_status`, `get_usage`.
+Next: RFP Phase 2 — `parse_query` / `search_services` with the credit guard
+(credit-spending measurements first, with approval) and the e2e suite.
 
 Design authority: `docs/ja/shodan-lookup-rfp.ja.md` (primary) and
 `docs/en/shodan-lookup-rfp.md`.
@@ -99,7 +98,9 @@ the Phase 1 measurements"; the essentials:
   An unindexed global IP (consumer pool) gives the same body with count 0.
 - **`history=true` works on Membership** (9.9.9.9, 208.67.222.222, 1.0.0.1:
   200, 1.0–6.4 MB) and is **silently capped at the latest 1,000 banners** —
-  about two weeks on a busy host. Not in Phase 1.
+  one chatty port can fill it (973 of 1,000 on 53/udp, a 2.5-day window).
+  Banners come unordered. `get_history` states the window and names a
+  dominating port; its 404 is cross-checked like the host 404.
 - **Silent no-ops**: an unknown filter becomes free text (200, 0 results;
   `tokens` shows it as `nosuchfilter\:x`); an unknown facet name is dropped
   (200, no `facets` key); an unknown query parameter is ignored. Validate

@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -20,6 +21,7 @@ type fakeEngine struct {
 	gotService engine.ServiceQuery
 	gotFacets  []engine.FacetSpec
 	page       *engine.Page
+	gotHistory engine.HistoryQuery
 }
 
 func (f *fakeEngine) LookupHost(_ context.Context, ip string, _ bool) (*engine.Host, error) {
@@ -53,6 +55,18 @@ func (f *fakeEngine) GetService(_ context.Context, q engine.ServiceQuery, _ bool
 func (f *fakeEngine) CountServices(_ context.Context, q string, facets []engine.FacetSpec, _ bool) (*engine.Count, error) {
 	f.gotFacets = facets
 	return &engine.Count{Query: q, Unit: "services", Total: 3}, nil
+}
+
+func (f *fakeEngine) GetHistory(_ context.Context, q engine.HistoryQuery, _ bool) (*engine.History, error) {
+	f.gotHistory = q
+	h := &engine.History{IP: q.IP, Window: engine.HistoryWindow{Banners: 30, Cap: engine.HistoryCap}}
+	p := engine.PortHistory{Port: 443, Transport: "tcp", Observations: 30}
+	for i := 0; i < 30; i++ {
+		p.Variants = append(p.Variants, engine.Variant{Title: fmt.Sprintf("title %02d", i), Observations: 1})
+	}
+	p.VariantCount = len(p.Variants)
+	h.Ports = []engine.PortHistory{p}
+	return h, nil
 }
 
 func (f *fakeEngine) GetQuota(context.Context) (*engine.Quota, error) {
@@ -277,4 +291,34 @@ func toStrings(v any) []string {
 		out = append(out, x.(string))
 	}
 	return out
+}
+
+// Variants past the cap are dropped from the oldest end — the newest are what
+// the port answers with now — and counted.
+func TestGetHistoryCapsVariantsKeepingTheNewest(t *testing.T) {
+	m, text, isErr := call(t, lookupServer(t, &fakeEngine{}), ToolGetHistory, `{"ip":"1.2.3.4"}`)
+	if isErr {
+		t.Fatal(text)
+	}
+	port := m["ports"].([]any)[0].(map[string]any)
+	vs := port["variants"].([]any)
+	if len(vs) != mcpMaxVariants || vs[len(vs)-1].(map[string]any)["title"] != "title 29" || port["variant_count"] != 30.0 {
+		t.Errorf("variants: %d, last %v, count %v", len(vs), vs[len(vs)-1], port["variant_count"])
+	}
+	if om := m["omitted"].(map[string]any); om["variants"] != 10.0 {
+		t.Errorf("omitted = %v", om)
+	}
+}
+
+func TestGetHistoryArguments(t *testing.T) {
+	eng := &fakeEngine{}
+	s := lookupServer(t, eng)
+	if _, text, isErr := call(t, s, ToolGetHistory, `{"ip":"1.2.3.4","port":443}`); isErr || eng.gotHistory.Limit != mcpDefaultList {
+		t.Errorf("default observation limit %d (%s)", eng.gotHistory.Limit, text)
+	}
+	for _, args := range []string{`{}`, `{"ip":"1.2.3.4","limit":5}`, `{"ip":"1.2.3.4","port":443,"limit":51}`, `{"ip":"1.2.3.4","transport":"tcp"}`} {
+		if _, text, isErr := call(t, s, ToolGetHistory, args); !isErr || !strings.Contains(text, CodeInvalidArgument) {
+			t.Errorf("%s: %s", args, text)
+		}
+	}
 }

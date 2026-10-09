@@ -56,9 +56,10 @@ Go 1.25+. **No external dependencies — standard library only.**
   `not_indexed` only after a credit-free `count ip:<addr>` confirms zero; a
   positive count or a failed check is `upstream_error`. `not_observed` (no
   banner for a port) is not "closed". An empty `vulns` is not "no
-  vulnerabilities"; `verified: false` is an inference. `history` is not in
-  Phase 1: it works on Membership but is silently capped at 1,000 banners and
-  404s for some hosts that have data.
+  vulnerabilities"; `verified: false` is an inference. `history` works on
+  Membership but is silently capped at 1,000 banners and 404s for some hosts
+  that have data: `get_history` always states its window, never presents a
+  first sighting as an opening, and cross-checks the 404.
 - **Silent no-ops upstream are refused here.** Unknown filters become free
   text (0 results) and unknown facets are dropped, so names are checked
   against `/shodan/host/search/filters` and `/facets`; `vuln` and `tag` are

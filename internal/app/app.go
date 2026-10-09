@@ -1,5 +1,6 @@
 // Package app implements the shodan-lookup command-line interface: subcommand
-// dispatch plus the host / service / count / quota / cache / mcp commands.
+// dispatch plus the host / service / count / history / quota / cache / mcp
+// commands.
 // Core logic lives in the ipaddr, shodan, cache, config and engine packages;
 // this package is the thin I/O shell around them.
 package app
@@ -38,6 +39,8 @@ func run(args []string, version string, stdin io.Reader, stdout, stderr io.Write
 		return runService(rest, version, stdout, stderr)
 	case "count":
 		return runCount(rest, version, stdout, stderr)
+	case "history":
+		return runHistory(rest, version, stdout, stderr)
 	case "quota":
 		return runQuota(rest, version, stdout, stderr)
 	case "cache":
@@ -77,6 +80,7 @@ Commands:
   host <IP>...             Open ports, products, certificates and inferred CVEs of a host
   service <IP> <PORT>      One service of a host in full, section by section
   count <QUERY>            How many services match a Shodan query, with breakdowns
+  history <IP>             What it exposed over time: per port, when each variant was seen
   quota                    Your plan and remaining query credits (always live)
   cache status             Show the result-cache state and the config file read
   cache clear              Clear the result cache
@@ -91,6 +95,11 @@ Flags (after or before the target):
   service:  --section banner|http_html|http_headers|ssl_cert|ssl_chain|vulns
             --transport tcp|udp  --offset N  --limit N
   count:    --facet NAME[:N] (repeatable, N 1-1000; e.g. --facet ip:20)
+  history:  --port N (its observations)  --transport tcp|udp  --offset N  --limit N
+            --raw (every historical banner in full)
+
+History is Shodan's latest 1,000 banners: when capped, nothing earlier can be
+read, and a port's first sighting is the first inside that window.
 
 Counts are in services (banners), not hosts. Filter and facet names are
 checked against Shodan's own lists; vuln and tag are refused on a Membership

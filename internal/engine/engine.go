@@ -79,6 +79,7 @@ func invalid(msg string) error { return &Error{Code: CodeInvalidArgument, Messag
 // stand in for it.
 type Upstream interface {
 	Host(ctx context.Context, ip string) (*shodan.Response, error)
+	HostHistory(ctx context.Context, ip string) (*shodan.Response, error)
 	Count(ctx context.Context, query, facets string) (*shodan.Response, error)
 	Filters(ctx context.Context) (*shodan.Response, error)
 	Facets(ctx context.Context) (*shodan.Response, error)
