@@ -17,7 +17,7 @@ PLATFORMS := \
 	darwin/arm64 \
 	windows/amd64
 
-.PHONY: build build-all test lint check package verify-release clean help
+.PHONY: build build-all test lint check e2e e2e-credits package verify-release clean help
 
 ## build: Build for the current platform
 build:
@@ -39,6 +39,7 @@ build-all:
 test:
 	go test -race -cover ./...
 	go vet -tags e2e ./...
+	go vet -tags 'e2e e2e_credits' ./...
 
 ## lint: Run golangci-lint
 lint:
@@ -46,6 +47,17 @@ lint:
 
 ## check: Run lint + test + build-all
 check: lint test build-all
+
+## e2e: Live end-to-end tests against the real Shodan API (network and an API
+## key required; a missing key fails the run). Spends no query credits, and
+## fails if the remainder moved.
+e2e: build
+	go test -tags e2e -count=1 -v ./e2e/...
+
+## e2e-credits: the one credit-spending check — SPENDS ONE QUERY CREDIT.
+e2e-credits: build
+	@echo "e2e-credits: this spends exactly one Shodan query credit (a filtered search)."
+	go test -tags 'e2e e2e_credits' -count=1 -v -run 'Credits' ./e2e/...
 
 ## package: Build all platforms, archive with version suffix (zip for
 ## darwin/windows, tar.gz for linux), bundle the canonical binary +

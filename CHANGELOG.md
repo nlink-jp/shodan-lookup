@@ -19,6 +19,10 @@ adheres to [Semantic Versioning](https://semver.org/).
   again afterwards, and a spend other than predicted — or one that cannot be
   read — stops searching for the process (`credit_mismatch`). The CLI prints
   what was spent on stderr; `search --raw` prints every banner of the page.
+- The live e2e suite (`make e2e`): credit-free — the remainder is read
+  before and after and any difference fails it — and it fails without a key
+  instead of skipping. It pins the upstream traps the design rests on.
+  `make e2e-credits` is the one check that spends a credit.
 - `history` and the MCP tool `get_history`: per port, the first and last
   sighting and each variant (product, version, page title, certificate
   SHA-1) with when it was seen, inside a stated window — Shodan returns only

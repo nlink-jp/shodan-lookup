@@ -27,6 +27,8 @@ released**; Phase 2 (credit-spending search) is next.
 make build       # → dist/shodan-lookup  (never `go build` directly — it drops the binary in the repo root)
 make test        # go test -race -cover ./... then go vet -tags e2e ./...   (fully offline)
 make check       # lint + test + build-all
+make e2e         # live against Shodan, credit-free; needs the key; fails if credits moved
+make e2e-credits # live, SPENDS ONE QUERY CREDIT
 ```
 
 Go 1.25+. **No external dependencies — standard library only.**

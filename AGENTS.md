@@ -14,9 +14,10 @@ history"), not released.** CLI `host`, `service`, `count`, `history`, `tokens`,
 `get_service`, `count_services`, `get_history`, `parse_query`,
 `search_services`, `get_quota`, `cache_status`, `get_usage`.
 Phase 2 implemented: `parse_query` / `search_services` (CLI `tokens` /
-`search`) with the credit guard (engine/search.go). Next: the e2e suite,
-release preparation, and the pre-release independent verification (history
-and Phase 2 have not been verified independently yet).
+`search`) with the credit guard (engine/search.go), and the e2e suite. Next:
+the pre-release independent verification (history, Phase 2 and the fixes
+of the last verification have not been verified independently yet) and the
+release.
 
 Design authority: `docs/ja/shodan-lookup-rfp.ja.md` (primary) and
 `docs/en/shodan-lookup-rfp.md`.
@@ -30,10 +31,14 @@ make lint        # golangci-lint (config in .golangci.yml)
 make check       # lint + test + build-all
 make package     # archives per the org Release Archive Standard, notarizes darwin
 make verify-release
+make e2e         # live, credit-free; fails without a key and if the remainder moved
+make e2e-credits # live, SPENDS ONE CREDIT: a filtered search, predicted vs actual
 ```
 
-Never run `go build` directly. The `e2e` target arrives in RFP Phase 2;
-`make e2e` must then fail — not skip — without a key.
+Never run `go build` directly. The e2e suite reads the key from the
+operator's config (or `SHODAN_LOOKUP_E2E_CONFIG`), uses its own cache, and
+pins the upstream traps the design rests on — a failing pin names the
+Gotcha below that is out of date.
 
 ## Structure
 
@@ -49,6 +54,7 @@ internal/termsafe/      the one list of characters a terminal obeys
 internal/mcp/           stdio JSON-RPC 2.0 server; the response budget (lookup.go) and its backstops (budget.go); usage.md
 internal/app/           dispatch; host / service / count / quota / cache / mcp; text made inert as a whole (forText)
 scripts/                codesign / notarize / brew — byte-identical copies of nlink-jp/.github/templates
+e2e/                    live tests (tags e2e, e2e_credits): the tool end to end, and the upstream traps pinned
 docs/{ja,en}/           RFP
 ```
 

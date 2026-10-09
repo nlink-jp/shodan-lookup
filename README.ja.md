@@ -51,6 +51,8 @@ IP アドレスがインターネットから見て何を晒しているか — 
 
 ```bash
 make build        # → dist/shodan-lookup
+make test         # オフライン
+make e2e          # 利用者のキーで実機の Shodan に対して実行。クレジットは使わず、動いたら失敗する
 ```
 
 ## 設定

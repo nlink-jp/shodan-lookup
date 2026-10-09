@@ -53,6 +53,8 @@ Not released yet. Build from source:
 
 ```bash
 make build        # → dist/shodan-lookup
+make test         # offline
+make e2e          # live against Shodan with your key; spends no credits, and fails if any moved
 ```
 
 ## Configuration

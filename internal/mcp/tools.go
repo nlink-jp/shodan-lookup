@@ -11,15 +11,15 @@ import (
 
 // Tool names. Adding a tool is a compatible change; renaming one is breaking.
 const (
-	ToolLookupHost    = "lookup_host"
-	ToolGetService    = "get_service"
-	ToolCountServices = "count_services"
-	ToolGetHistory    = "get_history"
+	ToolLookupHost     = "lookup_host"
+	ToolGetService     = "get_service"
+	ToolCountServices  = "count_services"
+	ToolGetHistory     = "get_history"
 	ToolParseQuery     = "parse_query"
 	ToolSearchServices = "search_services"
-	ToolGetQuota      = "get_quota"
-	ToolCacheStatus   = "cache_status"
-	ToolGetUsage      = "get_usage"
+	ToolGetQuota       = "get_quota"
+	ToolCacheStatus    = "cache_status"
+	ToolGetUsage       = "get_usage"
 )
 
 // Error codes this layer emits. The upstream client's and the engine's codes
