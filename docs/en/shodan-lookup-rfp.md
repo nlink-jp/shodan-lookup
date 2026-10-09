@@ -3,6 +3,7 @@
 > Generated: 2026-10-09
 > Status: Approved (2026-10-09). Revised the same day after the design-freeze independent verification pass;
 > see "Revision after the independent verification pass" in the Discussion Log.
+> Where measurements before implementation contradicted the text, see "Corrections from the Phase 1 measurements".
 > Translation of `docs/ja/shodan-lookup-rfp.ja.md` (the Japanese version is primary)
 
 ## 1. Problem Statement
@@ -331,6 +332,40 @@ Measured on 2026-10-09 (17 credit-free calls) unless stated otherwise; credits w
   - **Limits (§5.5)**: Shodan may set fixed transmission limits at any time. Pacing and the credit floor assume this.
   - **Software licence (§11)**: reverse engineering Shodan-provided software is forbidden. This tool is written from the public API documentation and uses no Shodan software, so the clause does not apply.
 - InternetDB (no key) is free only for non-commercial use; commercial use needs an Enterprise licence (official page). It is not adopted, per §3.
+
+## Corrections from the Phase 1 measurements (2026-10-09, before implementation)
+
+The "measure before implementing" items of §4 Phase 1 were measured with 49 credit-free calls over two runs of 29 and 20 (credits 100 before and after each). The items below are where the text above was wrong, and what it lacked. AGENTS.md Gotchas holds the measured values.
+
+1. **The reason for excluding `history` was wrong.**
+   - On a Membership key, 9.9.9.9, 208.67.222.222 and 1.0.0.1 answered `history=true` with 200 (1.0–6.4 MB).
+   - The 404s for 8.8.8.8 and 1.1.1.1 reproduced. Yet a count of the same IPs (`ip:` filter, no credit) shows 2 and 15 services, so the 404 is read as upstream failing to return that history, not as an entitlement. The independent verification's M6, which warned against generalising from n=2, was right.
+   - **`history` is also silently truncated to the latest 1,000 banners.** All three returned exactly 1,000; on a busy host that reaches back only two weeks. The oldest observation does not mean nothing was seen before it.
+   - `history` stays out of Phase 1. Whether to add it is decided anew with the operator. Conditions if added: the cross-check of item 2, and stating the 1,000-banner truncation.
+2. **The "no information" 404 also comes from upstream failures**, so §3's "becomes `not_indexed`" could produce false negatives as written.
+   - When a host lookup returns 404 "No information available for that IP.", the tool cross-checks with a credit-free count `ip:<address>`.
+   - Zero means `not_indexed`. One or more means `upstream_error`: "Shodan holds N services for this IP but did not return the record".
+   - If the cross-check fails, the answer is `upstream_error`, never `not_indexed`.
+   - The extra call happens only on a 404.
+3. **Host lookups do not check the key.**
+   - `/shodan/host/{ip}` returned the full record with a wrong key and with no key at all; `history` behaved the same.
+   - Only `count`, `tokens` and `/api-info` answer 401, all as non-JSON text/plain, so a wrong key does not surface through host lookups.
+   - The tool still requires the key and always sends it, so queries run under the operator's account. `get_quota` and `count_services` are where a wrong key shows.
+4. **Unknown filters silently become text, and unknown facet names are silently dropped.**
+   - `nosuchfilter:x` returned 200 with 0 results, and `tokens` treated it as the string `nosuchfilter\:x`.
+   - An unknown facet name returned 200 with no `facets` key at all.
+   - Both read as "nothing matched". Filter and facet names are therefore checked against upstream's own lists (`/shodan/host/search/filters` and `/facets`, credit-free, cached 24 h) and refused with `invalid_argument` before sending. Only `name:` tokens outside quotes are picked out lexically.
+5. **Plan restrictions show up as low counts, not errors.**
+   - `vuln:CVE-2021-44228` returned 200 with a count of 3, implausibly low for Log4Shell.
+   - Since no error marks it, `vuln` and `tag` (which the pricing table withholds from Membership) are refused with `plan_restricted` before sending.
+   - `tag:ics` returned 83,634, but whether it is restricted cannot be seen from outside, so it is treated the same.
+6. **Syntax errors**: an unbalanced quote returned 500 "The search request has timed out or your query was invalid." on count, indistinguishable from a timeout, and 400 "Invalid search query" on `tokens`. Quote balance is checked lexically. An empty query is 400 "Empty search query".
+7. **A zero-padded IPv4 (`008.008.008.008`) returns 500 "Unable to fetch information".** The local gate refuses it before sending.
+8. **IPv6 works.** `2001:4860:4860::8888` and its unabbreviated form returned the same record; the gate sends the canonical form.
+9. **Timestamps are UTC.** In 3 of 3 cases the newest observation was 2–30 minutes before the response's `Date` header (GMT). Ages since observation may be computed.
+10. **Facet sizes**: `ip:1000` returned 1,000 entries (39 KB), and `org:1000` returned all 663. A ceiling above 1,000 is unmeasured. MCP allows up to 100 entries per facet, the CLI up to 1,000.
+11. No host with hundreds of services could be found by credit-free means; the top of `port:65535` was about 1 KB. This stays unmeasured, and the caps and counts cover it.
+12. Responses carry no rate-limit headers (re-confirmed), and they come through Cloudflare.
 
 ---
 

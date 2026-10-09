@@ -75,33 +75,50 @@ schemas and the strict argument decoding the others received in the
 
 ## Gotchas
 
-Measured 2026-10-09 on a Membership key with credit-free calls only (17 calls;
-credits 100 before and after). The raw figures and their recount are in RFP
-§7; the essentials:
+Measured 2026-10-09 on a Membership key with credit-free calls only — 17 calls
+before the RFP, then 49 before Phase 1 (credits 100 before and after every
+run). Recounts and the design consequences are in RFP §7 and "Corrections from
+the Phase 1 measurements"; the essentials:
 
 - **The key is a query parameter only** (`?key=`; OpenAPI declares no
   security scheme). Every error path must be scrubbed of the URL.
-- **401 for a bad key is text/plain HTML-ish, not JSON** (seen on `/api-info`
-  only — measure the other endpoints in Phase 1).
-- **404 has two meanings**: `{"error": "Invalid IP"}` and
-  `{"error": "No information available for that IP."}`. The latter was taken
-  on TEST-NET (192.0.2.1), which the tool refuses before sending — measure an
-  unindexed global unicast IP in Phase 1.
-- **`history=true` returned that same "No information available" 404 for
-  8.8.8.8 and 1.1.1.1**, which have data (n=2; cause presumed to be the plan,
-  undocumented). Excluded.
+- **Host lookups do not check the key**: `/shodan/host/{ip}` returned the full
+  record with a wrong key and with none (history too). Only `count`, `tokens`
+  and `/api-info` answer 401 — text/plain HTML-ish, not JSON.
+- **404 has two bodies**: `{"error": "Invalid IP"}` and
+  `{"error": "No information available for that IP."}` — and the second also
+  comes from upstream failures: `history=true` on 8.8.8.8 / 1.1.1.1 returns it
+  reproducibly while `count ip:<addr>` shows 2 / 15 services. A host 404 is
+  cross-checked with that free count before it is called `not_indexed`.
+  An unindexed global IP (consumer pool) gives the same body with count 0.
+- **`history=true` works on Membership** (9.9.9.9, 208.67.222.222, 1.0.0.1:
+  200, 1.0–6.4 MB) and is **silently capped at the latest 1,000 banners** —
+  about two weeks on a busy host. Not in Phase 1.
+- **Silent no-ops**: an unknown filter becomes free text (200, 0 results;
+  `tokens` shows it as `nosuchfilter\:x`); an unknown facet name is dropped
+  (200, no `facets` key); an unknown query parameter is ignored. Validate
+  names against `/shodan/host/search/filters` and `/facets` (both free).
+- **Plan restrictions read as low counts**: `vuln:CVE-2021-44228` → 200,
+  total 3. `vuln` and `tag` are refused locally.
+- **Syntax errors**: unbalanced quote → count 500 "timed out or your query was
+  invalid" (ambiguous), tokens 400 "Invalid search query". Empty query → 400
+  "Empty search query". Zero-padded IPv4 → 500 "Unable to fetch information".
 - **Counts are services, not hosts**: an `ip` facet value equals the number of
-  matching services on that IP.
+  matching services on that IP. `ip:1000` returned 1,000 entries (39 KB);
+  `org:1000` all 663.
+- **Timestamps are UTC** (newest observation 2–30 min before `Date`, 3/3) and
+  carry no suffix (`2026-10-09T05:01:41.136770`).
+- **IPv6 works**, abbreviated or not.
 - **Sizes**: 8.8.8.8 19 KB; 1.1.1.1 316 KB (one service 92 KB — `http.html`
   59 KB, `http.favicon.data` 21 KB); a vulnerable host 991 KB with 138 CVEs,
   the same 225 KB `vulns` dict repeated in two services. `minify=true` returns
-  `data: []` (~500 B).
-- **Timestamps carry no time-zone suffix** (`2026-10-09T05:01:41.136770`).
-  Do not compute ages until UTC is confirmed.
-- **No rate-limit headers.** Documented 1 req/s on all plans.
-- **Credit-free (measured)**: host lookup, `count` with filters and
-  `facets=ip:N`, `tokens`. Search costs 1 credit with a filter or past page 1
-  (documented); page-2 accounting is unmeasured (Phase 2, with approval).
+  `data: []` (~500 B). No host with hundreds of services was found by free
+  means — unmeasured.
+- **No rate-limit headers** (Cloudflare in front). Documented 1 req/s.
+- **Credit-free (measured)**: host lookup (with or without history), `count`
+  with filters and facets, `tokens`, the filter and facet lists. Search costs
+  1 credit with a filter or past page 1 (documented); page-2 accounting is
+  unmeasured (Phase 2, with approval).
 - **Terms**: `https://static.shodan.io/legal/terms.html`, read 2026-10-09
   (sha256 and reading in RFP §7). Re-check the hash before each release.
 - The config used for the measurements first held a top-level `api_key`;
