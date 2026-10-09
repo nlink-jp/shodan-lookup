@@ -48,6 +48,9 @@ Every tool error is a result with `isError: true` whose text is
 | `unknown_tool` | no tool has that name | call `get_usage` for the list |
 | `response_too_large` | the result crossed the server's 128 KB ceiling and was withheld whole | ask for less: fewer ports, or one section at a time |
 | `internal_error` | a failure nothing classified | report it; retrying the same call is unlikely to help |
+| `not_indexed` | Shodan has not observed the IP: its record was absent and a count for `ip:<address>` confirmed zero services | an answer, not a failure — but not evidence that nothing is open; Shodan's crawl is not exhaustive |
+| `not_observed` | the host is indexed, but Shodan has no banner for that port (and transport) | an answer — not evidence that the port is closed; the message lists the ports Shodan did observe |
+| `plan_restricted` | the query uses `vuln` or `tag`, which Shodan withholds from a Membership plan; refused before sending because the restriction does not come back as an error, only as a misleadingly low count | rephrase without that filter or facet (for CVEs, look the host up and read its inferred CVEs) |
 | `missing_api_key` | no Shodan API key is configured; nothing was sent | the operator sets `key` under `[api]` in the config file, or `SHODAN_LOOKUP_API_KEY` |
 | `auth_failed` | Shodan refused the key (401). Host lookups do not check the key, so a wrong key shows up here, on counts and quota | the operator checks the key; retrying will not help |
 | `bad_request` | Shodan rejected the query (400); `message` carries Shodan's reason | fix the query |

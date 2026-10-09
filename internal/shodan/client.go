@@ -82,6 +82,11 @@ func Code(err error) string {
 	return ""
 }
 
+// MissingKey is the error for a query attempted with no key configured.
+func MissingKey() *Error {
+	return &Error{Code: CodeMissingKey, Message: "no Shodan API key is configured: set key under [api] in the config file, or SHODAN_LOOKUP_API_KEY (nothing was sent)"}
+}
+
 // maxBody bounds one response read. The largest measured was a 6.4 MB host
 // history; a host record measured up to 991 KB.
 const maxBody = 32 << 20
@@ -178,7 +183,7 @@ func (c *Client) get(ctx context.Context, path string, query url.Values) (*Respo
 		endpoint += "?" + query.Encode() // Encode sorts keys: a stable cache key
 	}
 	if c.key == "" {
-		return nil, &Error{Code: CodeMissingKey, Message: "no Shodan API key is configured: set key under [api] in the config file, or SHODAN_LOOKUP_API_KEY (nothing was sent)"}
+		return nil, MissingKey()
 	}
 	if err := c.pace.wait(ctx); err != nil {
 		return nil, c.transportError(err, endpoint)
