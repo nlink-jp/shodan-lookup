@@ -36,7 +36,7 @@ IP アドレスがインターネットから見て何を晒しているか — 
 [RFP](docs/ja/shodan-lookup-rfp.ja.md) の Phase 1・2 に履歴を加えて実装済みです:
 `host`・`service`・`count`・`history`・`tokens`・`search`・`quota` と、MCP
 ツール `lookup_host`・`get_service`・`count_services`・`get_history`・
-`parse_query`・`search_services`・`get_quota`。未リリースです。
+`parse_query`・`search_services`・`get_quota`。リリース済みで、版ごとの変更は [CHANGELOG.md](CHANGELOG.md) にあります。
 
 ## 必要なもの
 
@@ -47,7 +47,17 @@ IP アドレスがインターネットから見て何を晒しているか — 
 
 ## インストール
 
-未リリースです。ソースからビルドします:
+Homebrew（macOS arm64、Apple 公証済みビルド）:
+
+```bash
+brew install nlink-jp/tap/shodan-lookup
+```
+
+または [リリースページ](https://github.com/nlink-jp/shodan-lookup/releases)
+から各プラットフォームのアーカイブを取得します（darwin-arm64 の zip は公証済み、
+linux amd64/arm64 は tar.gz、windows amd64 は zip）。
+
+ソースからビルドする場合:
 
 ```bash
 make build        # → dist/shodan-lookup

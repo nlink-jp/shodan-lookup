@@ -38,7 +38,7 @@ Phases 1 and 2 of the [RFP](docs/en/shodan-lookup-rfp.md) are implemented,
 with history added: `host`, `service`, `count`, `history`, `tokens`,
 `search` and `quota`, and the MCP tools `lookup_host`, `get_service`,
 `count_services`, `get_history`, `parse_query`, `search_services` and
-`get_quota`. Not released yet.
+`get_quota`. Released; versions are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Requirements
 
@@ -49,7 +49,17 @@ with history added: `host`, `service`, `count`, `history`, `tokens`,
 
 ## Installation
 
-Not released yet. Build from source:
+Homebrew (macOS arm64, Apple-notarized build):
+
+```bash
+brew install nlink-jp/tap/shodan-lookup
+```
+
+Or download an archive for your platform from the
+[releases page](https://github.com/nlink-jp/shodan-lookup/releases)
+(darwin-arm64 zip is notarized; linux amd64/arm64 tar.gz; windows amd64 zip).
+
+Or build from source:
 
 ```bash
 make build        # → dist/shodan-lookup

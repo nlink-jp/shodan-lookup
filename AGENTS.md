@@ -9,7 +9,7 @@ TLS certificates, inferred CVEs, observation times. Series:
 cybersecurity-series. Module: `github.com/nlink-jp/shodan-lookup`.
 
 **Status: RFP Phase 1 (core) implemented with history added (RFP "Adding
-history"), not released.** CLI `host`, `service`, `count`, `history`, `tokens`,
+history"), released (versions in CHANGELOG.md).** CLI `host`, `service`, `count`, `history`, `tokens`,
 `search`, `quota`, `cache`, `mcp`, `version`; MCP tools `lookup_host`,
 `get_service`, `count_services`, `get_history`, `parse_query`,
 `search_services`, `get_quota`, `cache_status`, `get_usage`.

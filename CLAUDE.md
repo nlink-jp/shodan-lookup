@@ -19,7 +19,8 @@ account**.
 
 Design authority: [docs/ja/shodan-lookup-rfp.ja.md](docs/ja/shodan-lookup-rfp.ja.md)
 (English translation in docs/en/). **Status: RFP Phases 1 and 2 and history
-implemented, verified independently three times, not released.**
+implemented, verified independently three times, released (versions in
+CHANGELOG.md and `git tag`; Homebrew `nlink-jp/tap/shodan-lookup`).**
 
 ## Build & test
 
