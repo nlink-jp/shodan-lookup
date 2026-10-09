@@ -18,8 +18,8 @@ investigation** — but every query is **attributed to the operator's Shodan
 account**.
 
 Design authority: [docs/ja/shodan-lookup-rfp.ja.md](docs/ja/shodan-lookup-rfp.ja.md)
-(English translation in docs/en/). **Status: RFP Phase 1 implemented, not
-released**; Phase 2 (credit-spending search) is next.
+(English translation in docs/en/). **Status: RFP Phases 1 and 2 and history
+implemented, verified independently three times, not released.**
 
 ## Build & test
 

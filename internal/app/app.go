@@ -122,7 +122,8 @@ Exit codes:
      port" and a count of zero are answers
   1  upstream could not be asked, or not fully
   2  error (invalid input, an internal address, bad configuration, a missing
-     or refused API key, ...)
+     or refused API key, a plan-restricted filter, a search the credit guard
+     refused)
 
 Only a third-party index is read, so no packet reaches the host under
 investigation. Every query is attributed to your Shodan account: Shodan learns

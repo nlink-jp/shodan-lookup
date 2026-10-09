@@ -452,6 +452,33 @@ Credits actually spent: 2 (100 → 98). The raw record is kept outside the repos
 - `search_services` takes `page` (1–10). A call was measured to cost at most 1, which keeps §2's one credit per call. The cap of 10 is conservative against the Membership website's 20 pages; costs past page 2 are unmeasured.
 - The floor is checked on every call as if it cost 1, even when the prediction is 0 (the design-verification M1 decision). A cache hit sends nothing and checks nothing.
 
+## Pre-release independent verification (2026-10-09, commit 5614b4f)
+
+What arrived after the last verification (history, Phase 2, the previous fixes, e2e) and the release preparation were verified on a pinned worktree. The findings were high 0 / medium 4 / low 7, triaged by the author.
+
+**Credit record (all four approved)**: 2 for the measurements (the Phase 2 measurements section), 1 for the live check of the guard (98 → 97), and 1 for the first `make e2e-credits` run (97 → 96). Any further spend needs the operator's approval again.
+
+**Adopted**:
+
+- **A paid-for answer could fail to arrive, or invite a second charge (M1, M3, L1).**
+  - Large facets had a page withheld after the charge. Facet values are now thinned from their tails, then rows, and both are counted. MCP takes at most 5 facets.
+  - The recovery table advised retrying failures that had been charged. It now says that a failure naming a spend charges again on retry.
+  - An unreadable page was cached for 24 h after the charge. It is now validated with the projection's own types.
+- **Searching was stopped when it should not have been, and the key was blamed (M2).**
+  - A failure that was not charged no longer halts searching.
+  - A 401 on the search while `/api-info` answers before and after is the plan or the credits, not the key, so it is reported as `plan_restricted` (as §3 asked).
+- **IPv6 literals slipped past (M4).** A trailing colon, or an internal address glued to a word or a number, went out. Parts that start after a colon are now judged on the internal classes, while the whole run is still judged on every class.
+- **Details**:
+  - L2: `version:` values are exempt from the IPv4 scan; elsewhere the behaviour is a documented residual.
+  - L3: the cross-process race is recorded in AGENTS.md.
+  - L4: "short because of it" is said of capped windows only.
+  - L5: a history 404 does not claim anything about the past.
+  - L6: CHANGELOG, CLAUDE.md, AGENTS.md and the README exit codes fixed.
+  - L7: e2e checks the prediction of 0 before sending and runs with a floor of 0.
+- **From the observations**: the e2e "unobserved address" was a consumer's dynamic address. It is now an unused address in Google's IPv6 block (credit-free check: count 0, `not_indexed`). Past commits keep the old address; it is not a vulnerable host, so history is not rewritten.
+
+**Declined**: normalising the search cache key (whitespace, facet order). How a query is read is Shodan's to decide, and this tool does not equate two queries Shodan might read differently. The same string searched again is served from the cache.
+
 ---
 
 ## Discussion Log

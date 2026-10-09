@@ -157,7 +157,9 @@ How to read the answers:
 Exit codes: 0 — every query was answered ("not in Shodan's index", "no banner
 for that port" and a count of zero are answers); 1 — upstream could not be
 asked, or not fully; 2 — invalid input, an internal address, bad
-configuration, or a missing or refused API key.
+configuration, a missing or refused API key, a plan-restricted filter
+(`plan_restricted`), or a search the credit guard refused (`credit_floor`,
+`credit_mismatch`).
 
 ## MCP server
 

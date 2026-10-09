@@ -55,7 +55,7 @@ type fakeUp struct {
 	charge          int
 	tokensErr       error
 	searchErr       error
-	apiInfoErrAfter int // when > 0, /api-info fails after this many calls
+	apiInfoErrAfter int    // when > 0, /api-info fails after this many calls
 	searchBody      string // when set, the search answers this body
 	hostErr         map[string]error
 	totals          map[string]int // count query -> total

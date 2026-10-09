@@ -45,14 +45,14 @@ Gotcha below that is out of date.
 ```
 main.go                 CLI entry: main.version → app.Run
 source_test.go          no raw control / bidi character in any source file
-internal/ipaddr/        pre-network gate: IP arguments and ip:/net: query values against a finite class table; query lexer
+internal/ipaddr/        pre-network gate: IP arguments and every address literal in a query against a finite class table; query lexer
 internal/shodan/        REST client: key in the query only, no URL in any error, redirects refused, pacing, status → codes
 internal/engine/        gate → cache → client → OUR projection; 404 cross-check; name lists; sections; shared by CLI + MCP
 internal/config/        sectioned-TOML subset + SHODAN_LOOKUP_* (+ SHODAN_API_KEY alias); strict; base_url https-only
 internal/cache/         fixed-TTL JSON-file cache; Key = hash over length-prefixed parts; TTL 0 = off; a hit is the bytes put
 internal/termsafe/      the one list of characters a terminal obeys
 internal/mcp/           stdio JSON-RPC 2.0 server; the response budget (lookup.go) and its backstops (budget.go); usage.md
-internal/app/           dispatch; host / service / count / quota / cache / mcp; text made inert as a whole (forText)
+internal/app/           dispatch; host / service / count / history / tokens / search / quota / cache / mcp; text made inert as a whole (forText)
 scripts/                codesign / notarize / brew — byte-identical copies of nlink-jp/.github/templates
 e2e/                    live tests (tags e2e, e2e_credits): the tool end to end, and the upstream traps pinned
 docs/{ja,en}/           RFP
@@ -155,7 +155,15 @@ the Phase 1 measurements"; the essentials:
 - **The guard, live (2026-10-09, 1 more credit)**: an unfiltered search went
   through every step and spent 0 as predicted; a filtered one spent 1 as
   predicted (98 → 97); the repeat came from the cache; with the floor at 98
-  nothing was sent (exit 2). Phase 2 spent 3 of the 4 approved credits.
+  nothing was sent (exit 2). The first `make e2e-credits` run spent the
+  fourth (97 → 96): all four credits approved for Phase 2 are used, and any
+  further spend needs the operator's approval.
+- **Residual: concurrent processes can cross the floor.** The floor is
+  checked per process against a remainder read before sending; N processes
+  sharing the key that read the same remainder at once can each pass the
+  check, crossing the floor by up to N−1 credits. Each then sees a spend
+  other than predicted and stops searching (credit_mismatch). A shared lock
+  across processes was judged not worth its complexity (RFP §2).
 - **Terms**: `https://static.shodan.io/legal/terms.html`, read 2026-10-09
   (sha256 and reading in RFP §7). Re-check the hash before each release.
 - The config used for the measurements first held a top-level `api_key`;
