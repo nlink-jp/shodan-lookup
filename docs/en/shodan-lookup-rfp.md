@@ -371,6 +371,26 @@ The "measure before implementing" items of §4 Phase 1 were measured with 49 cre
     - A SHA-256 therefore reads as "nothing matched", so a 64-hex-digit value is refused with `invalid_argument` before sending, and the projection gains `sha1`.
     - `http.favicon.hash:` with the projection's `favicon_hash` worked as is (15 results).
 
+## Adding history (2026-10-09, operator decision)
+
+Following item 1 of the Phase 1 corrections, the operator decided to include `history`. It is valuable for IR: what was open at the time of an incident, and when what changed. The conditions for including it are to state the truncation and to cross-check the 404.
+
+- **MCP tool `get_history(ip, port?, transport?, offset?, limit?, refresh?)` and CLI `history <IP>`.** Upstream is `GET /shodan/host/{ip}?history=true`, credit-free (measured).
+- **Changes are returned, not raw banners.** One measured history had 973 of its 1,000 banners on 53/udp; a plain list would be unreadable.
+  - The default answer gives, per port, the first and last sighting inside the window and the number of observations.
+  - It also gives the **variants**: each distinct combination of product, version, HTTP title and certificate SHA-1, with when it was seen and how often. Measured: 1.0.0.1 443/tcp showed 2 products, 3 titles and 3 certificates in a 2.5-day window.
+  - With `port`, that port's observations are paged newest first: time, product, version, title, SHA-1, the banner's first line and its length.
+  - Historical banners in full are in the CLI's `--raw`.
+- **The window is always stated**: `window` holds the oldest and newest observation, the count, and whether the 1,000 cap was reached.
+  - When the cap is reached, a note says nothing earlier can be read, and that a port's first sighting is the first inside the window, not when it opened.
+  - When one port fills half the window or more, a note names it as the reason the window is short.
+  - Below the cap, whether this is all the history Shodan keeps is unknown (retention is undocumented); the tool does not claim it.
+- **The 404 is cross-checked as for host lookups** (a credit-free count `ip:<address>`).
+  - One or more services means `upstream_error`: "Shodan holds N services for this IP but did not return its history (measured on large hosts); the current record is available through lookup_host".
+  - Zero means `not_indexed`.
+- Budget: the summary is small (ports × variants). Variants are capped at 20 per port, with the rest counted. Observation pages hold 1–50 items (default 20).
+- Cache: the upstream body itself, under `HostTTL` (measured up to 6.4 MB), keyed apart from the current record.
+
 ---
 
 ## Discussion Log
