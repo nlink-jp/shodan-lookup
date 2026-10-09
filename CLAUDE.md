@@ -18,8 +18,8 @@ investigation** — but every query is **attributed to the operator's Shodan
 account**.
 
 Design authority: [docs/ja/shodan-lookup-rfp.ja.md](docs/ja/shodan-lookup-rfp.ja.md)
-(English translation in docs/en/). **Status: scaffold** — the lookup commands
-and tools arrive with the engine (RFP §4 Phase 1).
+(English translation in docs/en/). **Status: RFP Phase 1 implemented, not
+released**; Phase 2 (credit-spending search) is next.
 
 ## Build & test
 
@@ -52,10 +52,19 @@ Go 1.25+. **No external dependencies — standard library only.**
   explicit `--config`, and MCP arguments a tool does not declare
   (`decodeArgs`, every tool, including those that take none).
 - **A negative answer is never manufactured.** The 404 "No information
-  available for that IP." becomes `not_indexed` ("not in Shodan's index"),
-  never "closed" or "safe". `history=true` is excluded: on Membership it
-  returned that same 404 for IPs that have data. An empty `vulns` is not "no
-  vulnerabilities"; `verified: false` is an inference.
+  available for that IP." also comes from upstream failures, so it becomes
+  `not_indexed` only after a credit-free `count ip:<addr>` confirms zero; a
+  positive count or a failed check is `upstream_error`. `not_observed` (no
+  banner for a port) is not "closed". An empty `vulns` is not "no
+  vulnerabilities"; `verified: false` is an inference. `history` is not in
+  Phase 1: it works on Membership but is silently capped at 1,000 banners and
+  404s for some hosts that have data.
+- **Silent no-ops upstream are refused here.** Unknown filters become free
+  text (0 results) and unknown facets are dropped, so names are checked
+  against `/shodan/host/search/filters` and `/facets`; `vuln` and `tag` are
+  refused (`plan_restricted`) because the restriction reads as a low count.
+- **Host lookups do not check the key** (measured). Keep requiring and sending
+  it; `get_quota` / `count_services` are where a wrong key shows.
 - **Counts are services (banners), not hosts** — measured. Hence
   `count_services` / `search_services`.
 - **Credits are guarded by the tool, not by an argument.** Only

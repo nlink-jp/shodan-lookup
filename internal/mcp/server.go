@@ -22,6 +22,7 @@ const serverName = "shodan-lookup"
 type Server struct {
 	Cfg     *config.Config
 	Cache   *cache.Store
+	Eng     Engine
 	Version string
 }
 

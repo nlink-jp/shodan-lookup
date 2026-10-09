@@ -8,13 +8,13 @@ REST API with the operator's own API key: open ports, products and versions,
 TLS certificates, inferred CVEs, observation times. Series:
 cybersecurity-series. Module: `github.com/nlink-jp/shodan-lookup`.
 
-**Status: scaffold (RFP §4, Phase 2 of the org process).** Working:
-`version` / `--version` / `-v`, `help`, `cache status|clear`, `mcp` with
-`cache_status` and `get_usage`. Placeholders that exit 2 with "not implemented
-yet": `host`, `service`, `count`, `quota`. Next: RFP §4 Phase 1 (core) —
-measure first (the credit-free list in RFP §4), then `ipaddr`, the `shodan`
-client, the engine, and the MCP tools `lookup_host` / `get_service` /
-`count_services` / `get_quota`.
+**Status: RFP Phase 1 (core) implemented, not released.** CLI `host`,
+`service`, `count`, `quota`, `cache`, `mcp`, `version`; MCP tools
+`lookup_host`, `get_service`, `count_services`, `get_quota`, `cache_status`,
+`get_usage`. Next: RFP Phase 2 — `parse_query` / `search_services` with the
+credit guard (credit-spending measurements first, with approval), the e2e
+suite, and the decision on `history` (RFP "Corrections from the Phase 1
+measurements" item 1).
 
 Design authority: `docs/ja/shodan-lookup-rfp.ja.md` (primary) and
 `docs/en/shodan-lookup-rfp.md`.
@@ -38,18 +38,24 @@ Never run `go build` directly. The `e2e` target arrives in RFP Phase 2;
 ```
 main.go                 CLI entry: main.version → app.Run
 source_test.go          no raw control / bidi character in any source file
+internal/ipaddr/        pre-network gate: IP arguments and ip:/net: query values against a finite class table; query lexer
+internal/shodan/        REST client: key in the query only, no URL in any error, redirects refused, pacing, status → codes
+internal/engine/        gate → cache → client → OUR projection; 404 cross-check; name lists; sections; shared by CLI + MCP
 internal/config/        sectioned-TOML subset + SHODAN_LOOKUP_* (+ SHODAN_API_KEY alias); strict; base_url https-only
-internal/cache/         fixed-TTL JSON-file cache; Key = hash over length-prefixed parts; TTL 0 = off
+internal/cache/         fixed-TTL JSON-file cache; Key = hash over length-prefixed parts; TTL 0 = off; a hit is the bytes put
 internal/termsafe/      the one list of characters a terminal obeys
-internal/mcp/           stdio JSON-RPC 2.0 server; decodeArgs; budget backstops; embedded usage.md
-internal/app/           dispatch; cache / mcp commands; placeholders for the lookup commands
+internal/mcp/           stdio JSON-RPC 2.0 server; the response budget (lookup.go) and its backstops (budget.go); usage.md
+internal/app/           dispatch; host / service / count / quota / cache / mcp; text made inert as a whole (forText)
 scripts/                codesign / notarize / brew — byte-identical copies of nlink-jp/.github/templates
 docs/{ja,en}/           RFP
 ```
 
-Planned (RFP §3): `internal/ipaddr` (pre-network gate for IP arguments and
-query tokens), `internal/shodan` (REST client), `internal/engine` (gate →
-cache → client → projection, shared by CLI and MCP).
+Where the budget lives: the engine returns complete views (`--json` prints
+them); `internal/mcp/lookup.go` compacts — services to `default_services`,
+banners to `banner_bytes` *after JSON escaping*, CVEs to `default_vulns`,
+then thins services past a 112 KB soft budget — and counts every drop in
+`omitted`. `budget.go` exempts section content (`Text`, `Items`, `Summary`)
+from the 1000-character backstop by name.
 
 ## Where the scaffold came from
 

@@ -19,12 +19,14 @@ import (
 // so there is no section for it: the CLI's --json output is complete, and the
 // note says so.
 
-// ownCap names what is already governed by name: the page of text a caller
-// asked for from a section (get_service), which exists precisely to return the
-// whole text. A path that exists to reach the full text must be able to return
-// it, so the backstop never shortens it. Struct fields are matched by their Go
-// name and map entries by their key, so both spellings are listed.
-var ownCap = map[string]bool{"Text": true, "text": true}
+// ownCap names what is already governed by name: what get_service returns
+// from a section — the page of text, the page of items (a PEM certificate in
+// ssl_chain runs past 1000 characters), and a CVE summary (measured up to
+// 2,635). A path that exists to reach the full text must be able to return
+// it, so the backstop never shortens it; its own limit bounds the page.
+// Struct fields are matched by their Go name and map entries by their key, so
+// both spellings are listed.
+var ownCap = map[string]bool{"Text": true, "text": true, "Items": true, "items": true, "Summary": true}
 
 // fieldClip is the longest an ungoverned string may be, in characters. One
 // measured CVE summary inside a Shodan host record ran to 2,635 characters;

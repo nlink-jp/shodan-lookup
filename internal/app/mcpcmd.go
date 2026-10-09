@@ -36,11 +36,12 @@ func runMCP(args []string, version string, stdin io.Reader, stdout, stderr io.Wr
 		return exitError
 	}
 
-	// When the lookup tools land, the server gets the same engine the CLI
-	// commands build, so the two faces cannot give different answers.
+	// The same engine the CLI commands build, so the two faces cannot give
+	// different answers for the same input.
 	srv := &mcp.Server{
 		Cfg:     cfg,
 		Cache:   &cache.Store{Dir: cfg.CacheDir},
+		Eng:     NewEngine(cfg, version),
 		Version: version,
 	}
 

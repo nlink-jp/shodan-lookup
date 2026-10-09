@@ -8,6 +8,23 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `host`, `service`, `count`, `quota` and the MCP tools `lookup_host`,
+  `get_service`, `count_services`, `get_quota` (RFP Phase 1).
+  - Internal addresses are refused before anything is sent, in IP arguments
+    and in `ip:` / `net:` query values (`internal/ipaddr`).
+  - The API key travels only in the query string and never appears in an
+    error, a log, provenance or a cache file; redirects are refused.
+  - A host 404 "No information available" becomes `not_indexed` only after a
+    credit-free count confirms zero services; otherwise it is
+    `upstream_error`.
+  - Filter and facet names are checked against Shodan's own lists; `vuln`
+    and `tag` are refused (`plan_restricted`).
+  - Counts are reported in services, not hosts.
+  - MCP answers are budgeted (services, banners after escaping, CVEs) with
+    every drop counted in `omitted`; `get_service` pages every section in
+    full with a `doc_id`.
+  - Text output is made inert as a whole: banners are written by the host
+    under investigation.
 - Project scaffold (Phase 2 of the RFP): `version` / `--version` / `-v`
   (identical output), `help`, `cache status` / `cache clear`, and `mcp` with
   `cache_status` and `get_usage`. The lookup commands `host`, `service`,

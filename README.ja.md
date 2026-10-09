@@ -27,14 +27,10 @@ IP アドレスがインターネットから見て何を晒しているか — 
 
 ## 状況
 
-これはプロジェクトの骨組みです。照会コマンド `count`・`host`・`quota`・
-`service` はこのビルドではプレースホルダで、「not implemented yet」と
-表示して終了コード 2 で止まります。
-
-今動くのは `cache status`・`cache clear`・`mcp`・`version` です。
-
-MCP 側では `cache_status` と `get_usage` が応答します。
-照会ツールはエンジンと共に入ります（[RFP](docs/ja/shodan-lookup-rfp.ja.md) の Phase 1）。
+[RFP](docs/ja/shodan-lookup-rfp.ja.md) の Phase 1 を実装済みです: `host`・
+`service`・`count`・`quota` と、MCP ツール `lookup_host`・`get_service`・
+`count_services`・`get_quota`。クレジットを消費する検索（Phase 2）はこの
+ビルドには入っていません。未リリースです。
 
 ## 必要なもの
 
@@ -93,12 +89,43 @@ shodan-lookup mcp                      ローカル MCP サーバーとして起
 shodan-lookup version                  版数を表示
 ```
 
-件数の単位は**ホストではなくサービス（バナー）**です。一致するサービスを
-2 つ持つ IP は 2 と数えます。
+Shodan を読むコマンドはすべて `--json`（完全な JSON）を、`quota` 以外は
+`--refresh`（キャッシュを使わず取り直す）を受け付けます。
 
-終了コード: 0 — すべての照会に答えた（「Shodan の索引に無い」も件数 0 も答え
-です）。1 — 上流に問い合わせられなかった、または一部しか答えられなかった。
-2 — 使い方・入力・設定の誤り、または未実装のコマンド。
+```bash
+shodan-lookup host 1.2.3.4                                # 何を晒しているか
+shodan-lookup host 1.2.3.4 --port 443 --json              # 1 ポートだけ、完全な JSON
+shodan-lookup host 1.2.3.4 --raw                          # Shodan の文書そのもの
+shodan-lookup service 1.2.3.4 443 --section ssl_cert      # 証明書の全体
+shodan-lookup service 1.2.3.4 53 --transport udp --section banner
+shodan-lookup count 'port:3389 country:JP' --facet org:5 --facet ip:20
+shodan-lookup quota
+```
+
+答えの読み方:
+
+- **Shodan の索引に無い**（`not_indexed`）は、Shodan がその IP を観測して
+  いないという意味です。件数 0 で裏を取ってから答えます。Shodan の 404 だけ
+  では判断しません（Shodan は、持っている記録を返せなかったときにも同じ
+  404 を返すためです）。何も開いていないことの証拠ではありません。
+- **そのポートのバナーが無い**（`not_observed`）は、ポートが閉じている
+  ことの証拠ではありません。
+- **推定 CVE** はバナーの版から推定したものです。`verified: false` は推定で、
+  一覧が空でも「脆弱でない」ではありません。
+- **件数の単位はホストではなくサービス（バナー）**です。一致するサービスを
+  2 つ持つ IP は 2 と数えます。内訳は上位の値だけです。
+- **絞り込み条件と内訳の名前は、Shodan 自身の一覧と照合してから送ります**。
+  Shodan は知らない条件を文字列として扱って 0 件にし、知らない内訳は黙って
+  捨てるからです。`vuln` と `tag` は Membership では拒否します。制限がエラーでは
+  なく、不自然に少ない件数として返ってくるためです。
+- **時刻は UTC** です。証明書の `expired` は、照会した時点で計算します。
+- **ホスト照会は API キーを検査しません**（実測）。誤ったキーでもホストの記録は
+  返ります。キーの誤りは `quota` と `count` で分かります。
+
+終了コード: 0 — すべての照会に答えた（「Shodan の索引に無い」「そのポートの
+バナーが無い」「件数 0」も答えです）。1 — 上流に問い合わせられなかった、
+または一部しか答えられなかった。2 — 入力の誤り、内部アドレス、設定の誤り、
+API キーが無いか拒否された。
 
 ## MCP サーバー
 
@@ -110,8 +137,11 @@ shodan-lookup version                  版数を表示
 }
 ```
 
-最初に `get_usage` を呼んでください。全体のリファレンスと、エラーからの
-回復手順の表を返します。
+ツール: `lookup_host`・`get_service`・`count_services`・`get_quota`・
+`cache_status`・`get_usage`。最初に `get_usage` を呼んでください。全体の
+リファレンスと、エラーからの回復手順の表を返します。`lookup_host` は応答の
+予算内で答えます。既定を超えたサービス・バナー・CVE は `omitted` に件数として
+出し、`get_service` で各部分の全量をページ送りで読めます。
 
 ## データソースと利用条件
 

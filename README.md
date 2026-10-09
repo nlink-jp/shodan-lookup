@@ -28,15 +28,10 @@ refused before anything is sent.
 
 ## Status
 
-This is the project scaffold. The lookup commands `count`, `host`, `quota`
-and `service` are placeholders in this build: they exit 2 with "not
-implemented yet".
-
-What works today: `cache status`, `cache clear`, `mcp` and `version`.
-
-On the MCP side, `cache_status` and `get_usage` answer today;
-the lookup tools arrive with the engine (Phase 1 of the
-[RFP](docs/en/shodan-lookup-rfp.md)).
+Phase 1 of the [RFP](docs/en/shodan-lookup-rfp.md) is implemented: `host`,
+`service`, `count` and `quota`, and the MCP tools `lookup_host`,
+`get_service`, `count_services` and `get_quota`. The credit-spending search
+(Phase 2) is not part of this build. Not released yet.
 
 ## Requirements
 
@@ -95,12 +90,43 @@ shodan-lookup mcp                      Run as a local MCP server (stdio)
 shodan-lookup version                  Print the version
 ```
 
-Counts are in **services (banners), not hosts**: an IP with two matching
-services counts twice.
+Every command that reads Shodan takes `--json` (complete JSON) and, except
+`quota`, `--refresh` (bypass the cache).
 
-Exit codes: 0 — every query was answered ("not in Shodan's index" and a count
-of zero are answers); 1 — upstream could not be asked, or not fully; 2 —
-usage, validation or configuration error, or an unimplemented command.
+```bash
+shodan-lookup host 1.2.3.4                                # what it exposes
+shodan-lookup host 1.2.3.4 --port 443 --json              # one port, complete JSON
+shodan-lookup host 1.2.3.4 --raw                          # Shodan's own document
+shodan-lookup service 1.2.3.4 443 --section ssl_cert      # the whole certificate
+shodan-lookup service 1.2.3.4 53 --transport udp --section banner
+shodan-lookup count 'port:3389 country:JP' --facet org:5 --facet ip:20
+shodan-lookup quota
+```
+
+How to read the answers:
+
+- **Not in Shodan's index** (`not_indexed`) means Shodan has not observed the
+  IP — confirmed with a count of zero, never taken from Shodan's 404 alone,
+  which also comes back when Shodan fails to return a record it holds. It is
+  not evidence that nothing is open.
+- **No banner for a port** (`not_observed`) is not evidence that the port is
+  closed.
+- **Inferred CVEs** come from banner versions; `verified: false` means
+  inferred, and an empty list is not "not vulnerable".
+- **Counts are in services (banners), not hosts**: an IP with two matching
+  services counts twice. Facets list only their top values.
+- **Filter and facet names are checked** against Shodan's own lists before
+  sending: Shodan would read an unknown filter as text and match nothing, and
+  drop an unknown facet silently. `vuln` and `tag` are refused on Membership —
+  the restriction comes back as a misleadingly low count, not an error.
+- **Times are UTC**; a certificate's `expired` is computed when you ask.
+- **Host lookups do not check the API key** (measured): a wrong key still
+  returns host records. `quota` and `count` are where it shows.
+
+Exit codes: 0 — every query was answered ("not in Shodan's index", "no banner
+for that port" and a count of zero are answers); 1 — upstream could not be
+asked, or not fully; 2 — invalid input, an internal address, bad
+configuration, or a missing or refused API key.
 
 ## MCP server
 
@@ -112,7 +138,11 @@ usage, validation or configuration error, or an unimplemented command.
 }
 ```
 
-Call `get_usage` first: it is the full reference and the error-recovery table.
+Tools: `lookup_host`, `get_service`, `count_services`, `get_quota`,
+`cache_status`, `get_usage`. Call `get_usage` first: it is the full reference
+and the error-recovery table. `lookup_host` answers within a response budget
+— services, banners and CVEs past the defaults are counted in `omitted`, and
+`get_service` reaches every part in full, paged.
 
 ## Data source and terms
 
