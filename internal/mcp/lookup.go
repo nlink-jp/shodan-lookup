@@ -20,6 +20,7 @@ const (
 	mcpDefaultList  = 20
 	mcpMaxFacetN    = 100
 	mcpMaxPorts     = 50
+	mcpMaxNames     = 50 // hostnames and domains each
 	// softBudget is where lookup_host starts dropping services rather than
 	// let the result be withheld whole at maxResultBytes.
 	softBudget = 112 << 10
@@ -49,6 +50,9 @@ func (s *Server) lookupHost(ctx context.Context, raw json.RawMessage) (any, erro
 	if a.IP == "" {
 		return nil, invalidArg("ip is required")
 	}
+	if a.PortsOnly && len(a.Ports) > 0 {
+		return nil, invalidArg("ports and ports_only do not combine: ports_only lists no services")
+	}
 	if len(a.Ports) > mcpMaxPorts {
 		return nil, invalidArg(fmt.Sprintf("ports lists at most %d ports", mcpMaxPorts))
 	}
@@ -66,6 +70,14 @@ func (s *Server) lookupHost(ctx context.Context, raw json.RawMessage) (any, erro
 
 func (s *Server) compact(h *engine.Host, ports []int, portsOnly bool) *compactHost {
 	out := &compactHost{Host: h, Omitted: map[string]int{}}
+	// Names are listed up to a cap, whatever else is asked: a shared host can
+	// carry thousands, and no other field would bound them.
+	if n := len(h.Hostnames) - mcpMaxNames; n > 0 {
+		h.Hostnames, out.Omitted["hostnames"] = h.Hostnames[:mcpMaxNames], n
+	}
+	if n := len(h.Domains) - mcpMaxNames; n > 0 {
+		h.Domains, out.Omitted["domains"] = h.Domains[:mcpMaxNames], n
+	}
 	if portsOnly {
 		out.Omitted["services"] = len(h.Services)
 		out.Omitted["vulns"] = len(h.Vulns)
@@ -123,17 +135,29 @@ func (s *Server) compact(h *engine.Host, ports []int, portsOnly bool) *compactHo
 		h.Notes = append(h.Notes, fmt.Sprintf("only the %d highest-CVSS CVEs are listed; vuln_count is the total, and get_service section vulns lists each service's in full", limit))
 	}
 
-	// Last resort before the ceiling: drop services from the end, counted.
-	for len(h.Services) > 1 {
-		b, err := json.Marshal(out)
-		if err != nil || len(b) <= softBudget {
-			break
-		}
+	// Last resort before the ceiling: drop services from the end, then CVEs,
+	// counted. The size is measured as the ceiling measures it — indented,
+	// after the 1000-character backstop — or the thinning would run against a
+	// different number from the one that withholds the result.
+	capStrings(out)
+	for over(out) && len(h.Services) > 1 {
 		drop := (len(h.Services) + 1) / 2
 		out.Omitted["services"] += drop
 		h.Services = h.Services[:len(h.Services)-drop]
 	}
+	for over(out) && len(h.Vulns) > 1 {
+		drop := (len(h.Vulns) + 1) / 2
+		out.Omitted["vulns"] += drop
+		h.Vulns = h.Vulns[:len(h.Vulns)-drop]
+	}
 	return finish(out)
+}
+
+// over reports whether v, encoded as toolText encodes it, passes the soft
+// budget.
+func over(v any) bool {
+	b, err := json.MarshalIndent(v, "", "  ")
+	return err == nil && len(b) > softBudget
 }
 
 func finish(out *compactHost) *compactHost {
@@ -309,9 +333,36 @@ func (s *Server) getHistory(ctx context.Context, raw json.RawMessage) (any, erro
 			dropped += n - mcpMaxVariants
 		}
 	}
-	if dropped > 0 {
-		out.Omitted = map[string]int{"variants": dropped}
-		h.Notes = append(h.Notes, fmt.Sprintf("only the %d most recent variants per port are listed (variant_count is the total); pass port to page its observations", mcpMaxVariants))
+	// A host with hundreds of ports: fewer variants per port first, then
+	// fewer ports, each counted, before the ceiling would withhold it all.
+	capStrings(out)
+	for keep := mcpMaxVariants / 4; over(out) && keep >= 1; keep /= 4 {
+		for i := range h.Ports {
+			if n := len(h.Ports[i].Variants); n > keep {
+				h.Ports[i].Variants = h.Ports[i].Variants[n-keep:]
+				dropped += n - keep
+			}
+		}
+		if keep == 1 {
+			break
+		}
+	}
+	droppedPorts := 0
+	for over(out) && len(h.Ports) > 1 {
+		drop := (len(h.Ports) + 1) / 2
+		droppedPorts += drop
+		h.Ports = h.Ports[:len(h.Ports)-drop]
+	}
+	if dropped > 0 || droppedPorts > 0 {
+		out.Omitted = map[string]int{}
+		if dropped > 0 {
+			out.Omitted["variants"] = dropped
+			h.Notes = append(h.Notes, "not every variant is listed (variant_count is each port's total; the most recent are kept); pass port to page its observations")
+		}
+		if droppedPorts > 0 {
+			out.Omitted["ports"] = droppedPorts
+			h.Notes = append(h.Notes, "not every port is listed; pass port for one of them")
+		}
 	}
 	return out, nil
 }

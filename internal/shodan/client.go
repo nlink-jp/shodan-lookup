@@ -205,7 +205,7 @@ func (c *Client) get(ctx context.Context, path string, query url.Values) (*Respo
 	full.Set("key", c.key)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path+"?"+full.Encode(), nil)
 	if err != nil {
-		return nil, &Error{Code: CodeNetwork, Message: c.scrub("build request for " + endpoint + ": " + causeOf(err).Error())}
+		return nil, &Error{Code: CodeNetwork, Message: "build request for " + endpoint + ": " + printable(c.scrub(causeOf(err).Error()), 200)}
 	}
 	req.Header.Set("User-Agent", c.ua)
 	req.Header.Set("Accept", "application/json")
@@ -225,10 +225,10 @@ func (c *Client) get(ctx context.Context, path string, query url.Values) (*Respo
 			Message: fmt.Sprintf("upstream sent more than %d MiB for %s; refusing to read it", maxBody>>20, endpoint)}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		e := statusError(resp.StatusCode, body, endpoint)
-		e.Message = c.scrub(e.Message)
-		e.APIError = c.scrub(e.APIError)
-		return nil, e
+		// The key is scrubbed from upstream's text before it is clipped: a
+		// key quoted near the clip would otherwise lose its tail to the clip
+		// and keep its head, which the scrub no longer recognises.
+		return nil, statusError(resp.StatusCode, []byte(c.scrub(string(body))), endpoint)
 	}
 	if !json.Valid(body) {
 		return nil, &Error{Code: CodeDecode, Status: resp.StatusCode,
@@ -291,7 +291,7 @@ func (c *Client) transportError(err error, endpoint string) *Error {
 	if errors.Is(err, context.Canceled) {
 		return &Error{Code: CodeTimeout, Message: "cancelled while asking Shodan for " + endpoint}
 	}
-	return &Error{Code: CodeNetwork, Message: c.scrub("could not reach Shodan for " + endpoint + ": " + printable(causeOf(err).Error(), 200))}
+	return &Error{Code: CodeNetwork, Message: "could not reach Shodan for " + endpoint + ": " + printable(c.scrub(causeOf(err).Error()), 200)}
 }
 
 // causeOf unwraps every *url.Error, whose message quotes the full URL — and

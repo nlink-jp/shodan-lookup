@@ -435,3 +435,20 @@ func TestEveryHistoryFieldIsInertWhenPrinted(t *testing.T) {
 	printHistory(&out, forText(h))
 	assertInert(t, "printHistory", out.String())
 }
+
+// (L6) A certificate chain prints as lines behind the gutter, not as one line
+// of \x0a escapes.
+func TestChainItemsKeepTheirLines(t *testing.T) {
+	online(t)
+	out, errOut, code := runCLI("service", "1.2.3.4", "80", "--section", "http_headers")
+	if code != exitOK {
+		t.Fatalf("exit %d %s", code, errOut)
+	}
+	assertInert(t, "headers", out)
+	if strings.Contains(out, `\x0a`) {
+		t.Errorf("a newline was printed as an escape:\n%s", out)
+	}
+	if _, errOut, code := runCLI("host", "1.2.3.4", "--port", "80", "--ports-only"); code != exitError || !strings.Contains(errOut, "do not combine") {
+		t.Errorf("--port with --ports-only: exit %d %s", code, errOut)
+	}
+}

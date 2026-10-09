@@ -30,6 +30,10 @@ func runHost(args []string, version string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "shodan-lookup: host takes one or more IP addresses")
 		return exitError
 	}
+	if portsOnly && len(ports) > 0 {
+		fmt.Fprintln(stderr, "shodan-lookup: --port and --ports-only do not combine: --ports-only lists no services")
+		return exitError
+	}
 	if raw && (portsOnly || len(ports) > 0) {
 		fmt.Fprintln(stderr, "shodan-lookup: --raw prints Shodan's whole document; it does not combine with --port or --ports-only")
 		return exitError

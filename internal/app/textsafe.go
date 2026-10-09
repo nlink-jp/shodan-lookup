@@ -20,7 +20,7 @@ import (
 // multilineFields are the fields printed behind a gutter by block(), and the
 // only ones in which a newline or a tab survives. Everywhere else an embedded
 // newline would forge a line of this tool's own output.
-var multilineFields = map[string]bool{"Banner": true, "Text": true, "Summary": true}
+var multilineFields = map[string]bool{"Banner": true, "Text": true, "Summary": true, "Lines": true}
 
 // forText makes every string reachable from v safe to print on a terminal, in
 // place, and returns v. v must be a pointer.

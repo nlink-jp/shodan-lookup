@@ -22,6 +22,9 @@ type fakeEngine struct {
 	gotFacets  []engine.FacetSpec
 	page       *engine.Page
 	gotHistory engine.HistoryQuery
+	rich       int // title length on every service, with HTTP and TLS blocks
+	hostnames  int
+	histPorts  int // ports in the history; 0: one port
 }
 
 func (f *fakeEngine) LookupHost(_ context.Context, ip string, _ bool) (*engine.Host, error) {
@@ -34,11 +37,24 @@ func (f *fakeEngine) LookupHost(_ context.Context, ip string, _ bool) (*engine.H
 		if b == "" {
 			b = strings.Repeat("b", f.bannerSize)
 		}
-		h.Services = append(h.Services, engine.Service{Port: 1000 + i, Transport: "tcp", Banner: b, BannerChars: len([]rune(b))})
+		sv := engine.Service{Port: 1000 + i, Transport: "tcp", Banner: b, BannerChars: len([]rune(b))}
+		if f.rich > 0 {
+			st := 200
+			sv.Module, sv.Product, sv.Version, sv.Timestamp = "https", "ExampleServer", "1.0", "2026-10-09T00:00:00Z"
+			sv.HTTP = &engine.HTTP{Status: &st, Title: strings.Repeat("t", f.rich), Server: "ExampleServer", Location: "/"}
+			sv.SSL = &engine.SSL{SubjectCN: "h.example.test", IssuerCN: "Example CA", NotBefore: "2025-01-01T00:00:00Z",
+				NotAfter: "2027-01-01T00:00:00Z", SHA1: strings.Repeat("a", 40), SHA256: strings.Repeat("b", 64), Versions: []string{"TLSv1.2", "TLSv1.3"}}
+			sv.CPE23 = []string{"cpe:2.3:a:example:server:1.0"}
+			sv.Sections = []engine.Index{{Name: "banner", Size: 1, Unit: "chars"}, {Name: "http_html", Size: 1, Unit: "chars"}, {Name: "ssl_cert", Size: 1, Unit: "chars"}}
+		}
+		h.Services = append(h.Services, sv)
 		h.Ports = append(h.Ports, 1000+i)
 	}
 	for i := 0; i < f.vulns; i++ {
 		h.Vulns = append(h.Vulns, engine.Vuln{ID: "CVE-2000-" + strings.Repeat("0", 3) + string(rune('0'+i%10))})
+	}
+	for i := 0; i < f.hostnames; i++ {
+		h.Hostnames = append(h.Hostnames, fmt.Sprintf("host-%05d.shared.example.test", i))
 	}
 	h.ServiceCount, h.VulnCount = len(h.Services), len(h.Vulns)
 	return h, nil
@@ -60,12 +76,15 @@ func (f *fakeEngine) CountServices(_ context.Context, q string, facets []engine.
 func (f *fakeEngine) GetHistory(_ context.Context, q engine.HistoryQuery, _ bool) (*engine.History, error) {
 	f.gotHistory = q
 	h := &engine.History{IP: q.IP, Window: engine.HistoryWindow{Banners: 30, Cap: engine.HistoryCap}}
-	p := engine.PortHistory{Port: 443, Transport: "tcp", Observations: 30}
-	for i := 0; i < 30; i++ {
-		p.Variants = append(p.Variants, engine.Variant{Title: fmt.Sprintf("title %02d", i), Observations: 1})
+	ports := max(f.histPorts, 1)
+	for n := 0; n < ports; n++ {
+		p := engine.PortHistory{Port: 443 + n, Transport: "tcp", Observations: 30}
+		for i := 0; i < 30; i++ {
+			p.Variants = append(p.Variants, engine.Variant{Title: fmt.Sprintf("title %02d %s", i, strings.Repeat("v", 60)), Observations: 1})
+		}
+		p.VariantCount = len(p.Variants)
+		h.Ports = append(h.Ports, p)
 	}
-	p.VariantCount = len(p.Variants)
-	h.Ports = []engine.PortHistory{p}
 	return h, nil
 }
 
@@ -302,7 +321,7 @@ func TestGetHistoryCapsVariantsKeepingTheNewest(t *testing.T) {
 	}
 	port := m["ports"].([]any)[0].(map[string]any)
 	vs := port["variants"].([]any)
-	if len(vs) != mcpMaxVariants || vs[len(vs)-1].(map[string]any)["title"] != "title 29" || port["variant_count"] != 30.0 {
+	if len(vs) != mcpMaxVariants || !strings.HasPrefix(vs[len(vs)-1].(map[string]any)["title"].(string), "title 29") || port["variant_count"] != 30.0 {
 		t.Errorf("variants: %d, last %v, count %v", len(vs), vs[len(vs)-1], port["variant_count"])
 	}
 	if om := m["omitted"].(map[string]any); om["variants"] != 10.0 {
@@ -320,5 +339,80 @@ func TestGetHistoryArguments(t *testing.T) {
 		if _, text, isErr := call(t, s, ToolGetHistory, args); !isErr || !strings.Contains(text, CodeInvalidArgument) {
 			t.Errorf("%s: %s", args, text)
 		}
+	}
+}
+
+// The independent verification of b30dde9 (M1): with the defaults, fifty
+// services carrying HTTP and TLS and 400-character titles were measured under
+// the soft budget unindented and withheld whole at the indented ceiling.
+func TestTheBudgetIsMeasuredAsTheCeilingMeasuresIt(t *testing.T) {
+	eng := &fakeEngine{services: 50, bannerSize: 600, rich: 900, vulns: 25}
+	s := lookupServer(t, eng)
+	s.Cfg.DefaultServices, s.Cfg.DefaultVulns, s.Cfg.BannerBytes = 50, 25, 512
+	// The premise: unthinned and indented, this host is over the ceiling.
+	h, _ := eng.LookupHost(context.Background(), "1.2.3.4", false)
+	for i := range h.Services {
+		h.Services[i].Banner, _ = clipEscaped(h.Services[i].Banner, 512)
+	}
+	if b, _ := json.MarshalIndent(h, "", "  "); len(b) <= maxResultBytes {
+		t.Fatalf("the fixture is only %d bytes indented; it no longer tests the ceiling", len(b))
+	}
+	m, text, isErr := call(t, s, ToolLookupHost, `{"ip":"1.2.3.4"}`)
+	if isErr {
+		t.Fatalf("withheld: %.200s", text)
+	}
+	if len(text) > maxResultBytes {
+		t.Errorf("result is %d bytes", len(text))
+	}
+	kept := len(m["services"].([]any))
+	om, _ := m["omitted"].(map[string]any)
+	if kept == 50 || kept+int(om["services"].(float64)) != 50 {
+		t.Errorf("kept %d, omitted %v", kept, om)
+	}
+}
+
+// Names are capped and counted, so ports_only always has a way out.
+func TestThousandsOfHostnamesStillAnswer(t *testing.T) {
+	for _, args := range []string{`{"ip":"1.2.3.4"}`, `{"ip":"1.2.3.4","ports_only":true}`} {
+		m, text, isErr := call(t, lookupServer(t, &fakeEngine{services: 2, bannerSize: 10, hostnames: 4000}), ToolLookupHost, args)
+		if isErr {
+			t.Fatalf("%s: withheld: %.200s", args, text)
+		}
+		if n := len(m["hostnames"].([]any)); n != mcpMaxNames || m["omitted"].(map[string]any)["hostnames"] != 3950.0 {
+			t.Errorf("%s: hostnames %d, omitted %v", args, n, m["omitted"])
+		}
+	}
+}
+
+// (L2) The backstop shortens first; one huge title must not cost services.
+func TestOneHugeTitleCostsNoServices(t *testing.T) {
+	m, text, isErr := call(t, lookupServer(t, &fakeEngine{services: 4, bannerSize: 10, rich: 200000}), ToolLookupHost, `{"ip":"1.2.3.4"}`)
+	if isErr {
+		t.Fatalf("%.200s", text)
+	}
+	if n := len(m["services"].([]any)); n != 4 {
+		t.Errorf("services kept %d of 4 (omitted %v)", n, m["omitted"])
+	}
+}
+
+// (L3) ports and ports_only contradict each other.
+func TestPortsAndPortsOnlyAreRefusedTogether(t *testing.T) {
+	_, text, isErr := call(t, lookupServer(t, &fakeEngine{services: 2}), ToolLookupHost, `{"ip":"1.2.3.4","ports":[1000],"ports_only":true}`)
+	if !isErr || !strings.Contains(text, CodeInvalidArgument) {
+		t.Errorf("accepted: %s", text)
+	}
+}
+
+// A history of hundreds of ports is thinned and counted, not withheld.
+func TestAWideHistoryIsThinnedNotWithheld(t *testing.T) {
+	m, text, isErr := call(t, lookupServer(t, &fakeEngine{histPorts: 300}), ToolGetHistory, `{"ip":"1.2.3.4"}`)
+	if isErr {
+		t.Fatalf("withheld: %.200s", text)
+	}
+	if len(text) > maxResultBytes {
+		t.Errorf("result is %d bytes", len(text))
+	}
+	if om, _ := m["omitted"].(map[string]any); om["variants"] == nil {
+		t.Errorf("nothing was counted as omitted: %v", m["omitted"])
 	}
 }

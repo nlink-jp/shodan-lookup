@@ -277,3 +277,16 @@ func TestPacingSpacesRequests(t *testing.T) {
 		t.Errorf("slept %v after the interval had passed", slept)
 	}
 }
+
+// (L1) A key quoted where the message is clipped must not leave its head
+// behind: the scrub runs before the clip.
+func TestAKeyQuotedAtTheClipIsStillScrubbed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+		_, _ = w.Write([]byte(`{"error": "` + strings.Repeat("x", 290) + `key=` + testKey + `"}`))
+	}))
+	defer srv.Close()
+	_, err := newClient(srv.URL, time.Second).Count(context.Background(), "port:22", "")
+	e := clientErr(t, err)
+	assertNoKey(t, "clipped", e.Message, e.APIError)
+}
