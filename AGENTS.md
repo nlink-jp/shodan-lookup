@@ -104,7 +104,8 @@ the Phase 1 measurements"; the essentials:
   comes from upstream failures: `history=true` on 8.8.8.8 / 1.1.1.1 returns it
   reproducibly while `count ip:<addr>` shows 2 / 15 services. A host 404 is
   cross-checked with that free count before it is called `not_indexed`.
-  An unindexed global IP (consumer pool) gives the same body with count 0.
+  An unindexed global IP gives the same body with count 0 (the e2e fixture
+  is an unused address in Google's IPv6 block, 2001:4860:ffff:ffff::5).
 - **`history=true` works on Membership** (9.9.9.9, 208.67.222.222, 1.0.0.1:
   200, 1.0–6.4 MB) and is **silently capped at the latest 1,000 banners** —
   one chatty port can fill it (973 of 1,000 on 53/udp, a 2.5-day window).

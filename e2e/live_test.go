@@ -28,11 +28,11 @@ import (
 // checks the premise first and fails naming the fixture, rather than passing
 // on a meaning it lost.
 const (
-	googleDNS  = "8.8.8.8"        // a few services, 53 on tcp and udp; its history answers "no information"
-	cloudflare = "1.1.1.1"        // many services, TLS on several ports
-	quad9      = "9.9.9.9"        // a history that reaches the 1,000-banner cap
-	unindexed  = "126.7.81.203"   // a consumer address Shodan had not observed when measured
-	log4shell  = "CVE-2021-44228" // vuln: answered 3 for it on Membership
+	googleDNS  = "8.8.8.8"                // a few services, 53 on tcp and udp; its history answers "no information"
+	cloudflare = "1.1.1.1"                // many services, TLS on several ports
+	quad9      = "9.9.9.9"                // a history that reaches the 1,000-banner cap
+	unindexed  = "2001:4860:ffff:ffff::5" // an unused address in Google's block; unobserved when measured
+	log4shell  = "CVE-2021-44228"         // vuln: answered 3 for it on Membership
 	googleV6   = "2001:4860:4860::8888"
 )
 
@@ -70,6 +70,9 @@ func TestMain(m *testing.M) {
 	}
 	cfg = real
 	cfg.CacheDir = filepath.Join(dir, "cache") // never the operator's cache
+	// The operator's floor protects their own searches; the suite's free
+	// search must not fail on it near the end of a month.
+	cfg.CreditFloor = 0
 	client = shodan.New(cfg.BaseURL, key, cfg.Timeout, cfg.MinInterval, app.UserAgent("e2e"))
 	eng = engine.New(cfg, client, &cache.Store{Dir: cfg.CacheDir})
 
@@ -224,6 +227,12 @@ func TestLiveQuotaAndParseQuery(t *testing.T) {
 // nothing: unfiltered, page 1 (measured 0). TestMain's before/after read
 // proves it.
 func TestLiveFreeSearchRunsTheGuard(t *testing.T) {
+	// Prevent, do not only detect: Shodan's own reading must predict 0 before
+	// anything that could cost is sent.
+	r, err := eng.ParseQuery(ctx(t), "nginx")
+	if err != nil || r.PredictedCost != 0 {
+		t.Fatalf("Shodan no longer reads \"nginx\" as free (prediction %+v, %v); not searching", r, err)
+	}
 	s, err := eng.SearchServices(ctx(t), engine.SearchQuery{Query: "nginx"}, true)
 	if err != nil {
 		t.Fatalf("SearchServices: %v", err)
@@ -332,7 +341,10 @@ func TestLiveUnknownNamesAreSilentNoOps(t *testing.T) {
 		t.Errorf("an unknown filter now matches something: %s", resp.Body)
 	}
 	resp, err = client.Count(ctx(t), "port:22", "nosuchfacet:3")
-	if err == nil && bytes.Contains(resp.Body, []byte(`"facets"`)) {
+	switch {
+	case err != nil:
+		t.Logf("an unknown facet is now an error (%v). Good — update the Gotcha; the local check stays", err)
+	case bytes.Contains(resp.Body, []byte(`"facets"`)):
 		t.Errorf("an unknown facet now comes back: %s", resp.Body)
 	}
 }

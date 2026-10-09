@@ -89,7 +89,7 @@ func TestPublicAddressesPass(t *testing.T) {
 		"2002:0808:0808::1":           "2002:808:808::1",      // 6to4 of a public address
 		"64:ff9b::808:808":            "64:ff9b::808:808",     // NAT64 of a public address
 		"2a00:1450:4001:80b::200e":    "2a00:1450:4001:80b::200e",
-		"126.7.81.203":                "126.7.81.203",
+		"9.9.9.9":                     "9.9.9.9",
 		"191.255.255.255":             "191.255.255.255",
 		"192.0.3.0":                   "192.0.3.0",
 		"198.20.0.1":                  "198.20.0.1",
@@ -286,8 +286,8 @@ func TestIPv6GluedOrPunctuatedIsStillJudged(t *testing.T) {
 		}
 	}
 	for _, q := range []string{
-		"ip:2001:4860:4860::8888",                    // the tail of a public address is not another one
-		"2001:4860::1",                               // nor is ::1 inside it
+		"ip:2001:4860:4860::8888", // the tail of a public address is not another one
+		"2001:4860::1",            // nor is ::1 inside it
 		"ssl.cert.fingerprint:" + strings.TrimSuffix(strings.Repeat("AB:", 20), ":"),
 		`"12:30:00"`,
 		"product:Oracle version:10.2.0.4", // a version, not an address
