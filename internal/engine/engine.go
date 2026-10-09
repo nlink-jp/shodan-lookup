@@ -26,6 +26,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/nlink-jp/shodan-lookup/internal/cache"
@@ -45,6 +46,13 @@ const (
 	// CodeNotObserved: the host is indexed, but Shodan has no banner for the
 	// port asked about. Not "closed".
 	CodeNotObserved = "not_observed"
+	// CodeCreditFloor: a search would take the remaining query credits below
+	// the configured floor. Nothing was sent.
+	CodeCreditFloor = "credit_floor"
+	// CodeCreditMismatch: an earlier search in this process spent a
+	// different number of credits than predicted, or its spending could not
+	// be verified; searching stops for the rest of the process.
+	CodeCreditMismatch = "credit_mismatch"
 	// CodePlanRestricted: the query uses a filter or facet Shodan withholds
 	// from this plan. Refused before sending, because the restriction does
 	// not come back as an error: it reads as a low count.
@@ -84,6 +92,8 @@ type Upstream interface {
 	Filters(ctx context.Context) (*shodan.Response, error)
 	Facets(ctx context.Context) (*shodan.Response, error)
 	APIInfo(ctx context.Context) (*shodan.Response, error)
+	Tokens(ctx context.Context, query string) (*shodan.Response, error)
+	Search(ctx context.Context, query, facets string, page int) (*shodan.Response, error)
 }
 
 // Engine is the shared core.
@@ -92,6 +102,9 @@ type Engine struct {
 	up    Upstream
 	cache *cache.Store
 	now   func() time.Time
+
+	mu         sync.Mutex
+	searchHalt string // why searching stopped for this process; "" while it may search
 }
 
 // New builds an engine over an upstream client and a cache.

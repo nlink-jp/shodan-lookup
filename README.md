@@ -18,9 +18,11 @@ been used, and this tool what it exposes. Inferred CVEs continue to
 - **A negative answer is never manufactured.** An IP Shodan has not observed is
   reported as not in Shodan's index, never as "nothing open"; an empty list of
   inferred CVEs is not "no vulnerabilities".
-- **No query credits are spent by this build.** Host lookups, history,
-  counts and the quota are credit-free (measured). The credit-spending search
-  arrives in Phase 2, guarded by a floor you set.
+- **Credits are guarded by the tool.** Only `search` spends query credits
+  (1 per page with a filter or past page 1; measured). It refuses to go below
+  a floor you set, counting every search as 1, and stops if a search ever
+  spends other than predicted. Host lookups, history, counts and the quota
+  are credit-free (measured).
 
 Only a third-party index is read, so **no packet reaches the host under
 investigation**. Every query is attributed to your Shodan account: Shodan
@@ -32,11 +34,11 @@ judged by their spelling and are sent as written.
 
 ## Status
 
-Phase 1 of the [RFP](docs/en/shodan-lookup-rfp.md) is implemented, with
-history added: `host`, `service`, `count`, `history` and `quota`, and the MCP
-tools `lookup_host`, `get_service`, `count_services`, `get_history` and
-`get_quota`. The credit-spending search
-(Phase 2) is not part of this build. Not released yet.
+Phases 1 and 2 of the [RFP](docs/en/shodan-lookup-rfp.md) are implemented,
+with history added: `host`, `service`, `count`, `history`, `tokens`,
+`search` and `quota`, and the MCP tools `lookup_host`, `get_service`,
+`count_services`, `get_history`, `parse_query`, `search_services` and
+`get_quota`. Not released yet.
 
 ## Requirements
 
@@ -90,6 +92,8 @@ shodan-lookup host <IP>...             Open ports, products, certificates and in
 shodan-lookup service <IP> <PORT>      One service of a host in full, section by section
 shodan-lookup count <QUERY>            How many services match a Shodan query, with breakdowns
 shodan-lookup history <IP>             What it exposed over time: per port, when each variant was seen
+shodan-lookup tokens <QUERY>           How Shodan reads a query, and what a search would cost (free)
+shodan-lookup search <QUERY>           One page of matching services — SPENDS QUERY CREDITS
 shodan-lookup quota                    Your plan and remaining query credits (always live)
 shodan-lookup cache status|clear       Inspect or clear the result cache
 shodan-lookup mcp                      Run as a local MCP server (stdio)
@@ -108,6 +112,8 @@ shodan-lookup service 1.2.3.4 53 --transport udp --section banner
 shodan-lookup count 'port:3389 country:JP' --facet org:5 --facet ip:20
 shodan-lookup history 1.2.3.4                             # when ports, products, titles, certificates changed
 shodan-lookup history 1.2.3.4 --port 443 --limit 20       # that port's observations, newest first
+shodan-lookup tokens 'product:nginx country:JP'           # free: would a search cost a credit?
+shodan-lookup search 'product:nginx country:JP' --facet org:5   # 1 credit; prints what it spent on stderr
 shodan-lookup quota
 ```
 
@@ -132,6 +138,16 @@ How to read the answers:
   not when it opened; one chatty port can fill the window, and the answer
   names it. A history 404 is cross-checked like a host 404 — Shodan does not
   return the history of some large hosts that do have services.
+- **`search` spends query credits**: 1 per page when the query uses a filter
+  or the page is 2 or later, else 0 (measured; never more than 1 per call).
+  Before sending, it reads your remainder and refuses (exit 2,
+  `credit_floor`) if a search — counted as 1 whatever the prediction — would
+  take it below `[search] credit_floor` (default 20). Afterwards it reads the
+  remainder again and prints what was spent on stderr; if a search ever spends
+  other than predicted, the process stops searching (`credit_mismatch`). A
+  page is cached for 24 hours, so asking again spends nothing; `--refresh`
+  spends again. `count` is free and answers most "how many / which ones"
+  questions.
 - **Times are UTC**; a certificate's `expired` is computed when you ask.
 - **Host lookups do not check the API key** (measured): a wrong key still
   returns host records. `quota` and `count` are where it shows.
@@ -151,7 +167,8 @@ configuration, or a missing or refused API key.
 }
 ```
 
-Tools: `lookup_host`, `get_service`, `count_services`, `get_history`, `get_quota`,
+Tools: `lookup_host`, `get_service`, `count_services`, `get_history`,
+`parse_query`, `search_services` (the only one that spends credits), `get_quota`,
 `cache_status`, `get_usage`. Call `get_usage` first: it is the full reference
 and the error-recovery table. `lookup_host` answers within a response budget
 — services, banners and CVEs past the defaults are counted in `omitted`, and

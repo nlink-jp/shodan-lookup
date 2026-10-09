@@ -1,6 +1,6 @@
 // Package app implements the shodan-lookup command-line interface: subcommand
-// dispatch plus the host / service / count / history / quota / cache / mcp
-// commands.
+// dispatch plus the host / service / count / history / tokens / search /
+// quota / cache / mcp commands.
 // Core logic lives in the ipaddr, shodan, cache, config and engine packages;
 // this package is the thin I/O shell around them.
 package app
@@ -41,6 +41,10 @@ func run(args []string, version string, stdin io.Reader, stdout, stderr io.Write
 		return runCount(rest, version, stdout, stderr)
 	case "history":
 		return runHistory(rest, version, stdout, stderr)
+	case "tokens":
+		return runTokens(rest, version, stdout, stderr)
+	case "search":
+		return runSearch(rest, version, stdout, stderr)
 	case "quota":
 		return runQuota(rest, version, stdout, stderr)
 	case "cache":
@@ -81,6 +85,8 @@ Commands:
   service <IP> <PORT>      One service of a host in full, section by section
   count <QUERY>            How many services match a Shodan query, with breakdowns
   history <IP>             What it exposed over time: per port, when each variant was seen
+  tokens <QUERY>           How Shodan reads a query, and what a search would cost (free)
+  search <QUERY>           One page of matching services — SPENDS QUERY CREDITS
   quota                    Your plan and remaining query credits (always live)
   cache status             Show the result-cache state and the config file read
   cache clear              Clear the result cache
@@ -97,9 +103,15 @@ Flags (after or before the target):
   count:    --facet NAME[:N] (repeatable, N 1-1000; e.g. --facet ip:20)
   history:  --port N (its observations)  --transport tcp|udp  --offset N  --limit N
             --raw (every historical banner in full)
+  search:   --facet NAME[:N] (repeatable)  --page N (1-10)  --raw (every banner)
 
 History is Shodan's latest 1,000 banners: when capped, nothing earlier can be
 read, and a port's first sighting is the first inside that window.
+
+search is the only command that spends query credits: 1 when the query uses a
+filter or --page is 2 or later, else 0. It refuses to go below [search]
+credit_floor, counting every search as 1, and prints what it spent on stderr.
+count answers most questions for free; tokens predicts a search's cost.
 
 Counts are in services (banners), not hosts. Filter and facet names are
 checked against Shodan's own lists; vuln and tag are refused on a Membership

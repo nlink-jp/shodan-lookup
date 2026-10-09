@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -55,9 +56,10 @@ func historyBody() string {
 }
 
 type fakeShodan struct {
-	srv   *httptest.Server
-	hits  atomic.Int32
-	paths []string
+	srv     *httptest.Server
+	hits    atomic.Int32
+	paths   []string
+	credits atomic.Int32
 }
 
 func newFakeShodan(t *testing.T) *fakeShodan {
@@ -89,16 +91,35 @@ func newFakeShodan(t *testing.T) *fakeShodan {
 			_, _ = w.Write([]byte(`["port", "country", "org", "ip", "net", "vuln", "tag"]`))
 		case r.URL.Path == "/shodan/host/search/facets":
 			_, _ = w.Write([]byte(`["port", "country", "org", "ip", "vuln"]`))
-		case strings.HasPrefix(r.URL.Path, "/shodan/host/"):
+		case strings.HasPrefix(r.URL.Path, "/shodan/host/") && !strings.HasPrefix(r.URL.Path, "/shodan/host/search"):
 			w.WriteHeader(404)
 			_, _ = w.Write([]byte(`{"error": "No information available for that IP."}`))
 		case r.URL.Path == "/api-info":
-			_, _ = w.Write([]byte(`{"plan": "dev", "query_credits": 99, "scan_credits": 100, "monitored_ips": 0, "usage_limits": {"query_credits": 100, "scan_credits": 100, "monitored_ips": 16}}`))
+			_, _ = fmt.Fprintf(w, `{"plan": "dev", "query_credits": %d, "scan_credits": 100, "monitored_ips": 0, "usage_limits": {"query_credits": 100, "scan_credits": 100, "monitored_ips": 16}}`, f.credits.Load())
+		case r.URL.Path == "/shodan/host/search/tokens":
+			var filters []string
+			for _, term := range strings.Fields(r.URL.Query().Get("query")) {
+				if name, _, ok := strings.Cut(term, ":"); ok {
+					filters = append(filters, name)
+				}
+			}
+			b, _ := json.Marshal(map[string]any{"filters": append([]string{}, filters...), "errors": []string{}, "string": "", "attributes": map[string]any{}})
+			_, _ = w.Write(b)
+		case r.URL.Path == "/shodan/host/search":
+			if strings.Contains(r.URL.Query().Get("query"), ":") || r.URL.Query().Get("page") != "1" {
+				f.credits.Add(-1)
+			}
+			b, _ := json.Marshal(map[string]any{"total": 1, "matches": []any{map[string]any{
+				"ip_str": "1.2.3.4", "port": 80, "transport": "tcp", "org": "Example", "product": "ExampleServer",
+				"timestamp": "2026-10-09T05:00:00.000000", "_shodan": map[string]any{"module": "http"},
+				"http": map[string]any{"title": hostile}, "data": "HTTP/1.1 200 OK\r\n" + hostile}}})
+			_, _ = w.Write(b)
 		default:
 			w.WriteHeader(404)
 		}
 	}))
 	t.Cleanup(f.srv.Close)
+	f.credits.Store(99)
 	return f
 }
 
@@ -450,5 +471,65 @@ func TestChainItemsKeepTheirLines(t *testing.T) {
 	}
 	if _, errOut, code := runCLI("host", "1.2.3.4", "--port", "80", "--ports-only"); code != exitError || !strings.Contains(errOut, "do not combine") {
 		t.Errorf("--port with --ports-only: exit %d %s", code, errOut)
+	}
+}
+
+func TestTokensPredicts(t *testing.T) {
+	f := online(t)
+	out, errOut, code := runCLI("tokens", "port:80", "apache")
+	if code != exitOK || !strings.Contains(out, "filters:    port") || !strings.Contains(out, "spend 1 credit(s) for page 1") {
+		t.Errorf("exit %d %s\n%s", code, errOut, out)
+	}
+	if f.credits.Load() != 99 {
+		t.Error("tokens spent")
+	}
+}
+
+func TestSearchSpendsReportsAndCaches(t *testing.T) {
+	f := online(t)
+	out, errOut, code := runCLI("search", "port:80")
+	if code != exitOK {
+		t.Fatalf("exit %d %s", code, errOut)
+	}
+	if !strings.Contains(errOut, "spent 1 query credit(s) (predicted 1): 99 → 98, floor 20") {
+		t.Errorf("the spend is not reported on stderr: %q", errOut)
+	}
+	if !strings.Contains(out, "1 matching services") || !strings.Contains(out, "1.2.3.4") {
+		t.Errorf("output:\n%s", out)
+	}
+	assertInert(t, "search", out+errOut)
+
+	_, errOut, code = runCLI("search", "port:80")
+	if code != exitOK || !strings.Contains(errOut, "no query credit was spent") || f.credits.Load() != 98 {
+		t.Errorf("a cached page: exit %d, %q, credits %d", code, errOut, f.credits.Load())
+	}
+
+	raw, _, code := runCLI("search", "port:80", "--raw")
+	if code != exitOK || !strings.Contains(raw, `"matches"`) {
+		t.Errorf("--raw: exit %d %.200s", code, raw)
+	}
+	assertInert(t, "search --raw", raw)
+
+	js, _, code := runCLI("search", "port:80", "--json")
+	var s engine.Search
+	if code != exitOK || json.Unmarshal([]byte(js), &s) != nil || len(s.Rows) != 1 {
+		t.Errorf("--json: exit %d %.200s", code, js)
+	}
+}
+
+func TestSearchBelowTheFloorSendsNothing(t *testing.T) {
+	f := online(t)
+	t.Setenv("SHODAN_LOOKUP_CREDIT_FLOOR", "99")
+	_, errOut, code := runCLI("search", "apache")
+	if code != exitError || !strings.Contains(errOut, "credit_floor") || f.credits.Load() != 99 {
+		t.Errorf("exit %d, %s, credits %d", code, errOut, f.credits.Load())
+	}
+	for _, p := range f.paths {
+		if p == "/shodan/host/search" {
+			t.Error("a search was sent below the floor")
+		}
+	}
+	if _, errOut, code := runCLI("search", "port:80", "--page", "11"); code != exitError {
+		t.Errorf("--page 11: exit %d %s", code, errOut)
 	}
 }

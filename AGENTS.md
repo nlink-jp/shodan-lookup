@@ -9,11 +9,14 @@ TLS certificates, inferred CVEs, observation times. Series:
 cybersecurity-series. Module: `github.com/nlink-jp/shodan-lookup`.
 
 **Status: RFP Phase 1 (core) implemented with history added (RFP "Adding
-history"), not released.** CLI `host`, `service`, `count`, `history`,
-`quota`, `cache`, `mcp`, `version`; MCP tools `lookup_host`, `get_service`,
-`count_services`, `get_history`, `get_quota`, `cache_status`, `get_usage`.
-Next: RFP Phase 2 — `parse_query` / `search_services` with the credit guard
-(credit-spending measurements first, with approval) and the e2e suite.
+history"), not released.** CLI `host`, `service`, `count`, `history`, `tokens`,
+`search`, `quota`, `cache`, `mcp`, `version`; MCP tools `lookup_host`,
+`get_service`, `count_services`, `get_history`, `parse_query`,
+`search_services`, `get_quota`, `cache_status`, `get_usage`.
+Phase 2 implemented: `parse_query` / `search_services` (CLI `tokens` /
+`search`) with the credit guard (engine/search.go). Next: the e2e suite,
+release preparation, and the pre-release independent verification (history
+and Phase 2 have not been verified independently yet).
 
 Design authority: `docs/ja/shodan-lookup-rfp.ja.md` (primary) and
 `docs/en/shodan-lookup-rfp.md`.
@@ -142,6 +145,10 @@ the Phase 1 measurements"; the essentials:
   three. `query_credits` and `unlocked_left` drop together and show the
   charge at once. A page is up to 9.3 MB (100 banners); `total` moves
   between pages.
+- **The guard, live (2026-10-09, 1 more credit)**: an unfiltered search went
+  through every step and spent 0 as predicted; a filtered one spent 1 as
+  predicted (98 → 97); the repeat came from the cache; with the floor at 98
+  nothing was sent (exit 2). Phase 2 spent 3 of the 4 approved credits.
 - **Terms**: `https://static.shodan.io/legal/terms.html`, read 2026-10-09
   (sha256 and reading in RFP §7). Re-check the hash before each release.
 - The config used for the measurements first held a top-level `api_key`;

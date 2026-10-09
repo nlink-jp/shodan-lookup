@@ -71,8 +71,8 @@ Go 1.25+. **No external dependencies — standard library only.**
   it; `get_quota` / `count_services` are where a wrong key shows.
 - **Counts are services (banners), not hosts** — measured. Hence
   `count_services` / `search_services`.
-- **Credits are guarded by the tool, not by an argument** (Phase 2, not yet
-  built). Only `search_services` will spend them; the floor is checked on every call assuming a
+- **Credits are guarded by the tool, not by an argument.** Only
+  `search_services` / `search` spends them; the floor is checked on every call assuming a
   cost of 1, a failed check means no call, and a prediction/charge mismatch
   stops searching for the process.
 - **A tool result must fit a client's budget, and the budget lives at the MCP

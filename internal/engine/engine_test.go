@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -46,18 +47,23 @@ const hostFixture = `{
 var fixedNow = time.Date(2026, 10, 9, 7, 0, 0, 0, time.UTC)
 
 type fakeUp struct {
-	mu        sync.Mutex
-	hosts     map[string]string // ip -> body
-	histories map[string]string // ip -> history body
-	filtersRaw string // when set, the filters list answers this body
-	hostErr   map[string]error
-	totals    map[string]int // count query -> total
-	countErr  error
-	countRaw  map[string]string // count query+"|"+facets -> body
-	filters   []string
-	facets    []string
-	apiInfo   string
-	calls     []string
+	mu              sync.Mutex
+	hosts           map[string]string // ip -> body
+	histories       map[string]string // ip -> history body
+	filtersRaw      string            // when set, the filters list answers this body
+	credits         *int              // when set, /api-info reports it and each search subtracts charge
+	charge          int
+	tokensErr       error
+	searchErr       error
+	apiInfoErrAfter int // when > 0, /api-info fails after this many calls
+	hostErr         map[string]error
+	totals          map[string]int // count query -> total
+	countErr        error
+	countRaw        map[string]string // count query+"|"+facets -> body
+	filters         []string
+	facets          []string
+	apiInfo         string
+	calls           []string
 }
 
 func newFake() *fakeUp {
@@ -142,7 +148,48 @@ func (f *fakeUp) Facets(context.Context) (*shodan.Response, error) {
 
 func (f *fakeUp) APIInfo(context.Context) (*shodan.Response, error) {
 	f.record("apiinfo")
+	if f.apiInfoErrAfter > 0 && f.count("apiinfo") > f.apiInfoErrAfter {
+		return nil, &shodan.Error{Code: shodan.CodeTimeout, Message: "timeout"}
+	}
+	if f.credits != nil {
+		return resp(fmt.Sprintf(`{"plan": "dev", "query_credits": %d, "scan_credits": 100, "monitored_ips": 0, "usage_limits": {"query_credits": 100}}`, *f.credits), "/api-info"), nil
+	}
 	return resp(f.apiInfo, "/api-info"), nil
+}
+
+func (f *fakeUp) Tokens(_ context.Context, query string) (*shodan.Response, error) {
+	f.record("tokens " + query)
+	if f.tokensErr != nil {
+		return nil, f.tokensErr
+	}
+	filters := []string{}
+	for _, t := range strings.Fields(query) {
+		if name, _, ok := strings.Cut(strings.TrimPrefix(t, "-"), ":"); ok && name != "" {
+			filters = append(filters, name)
+		}
+	}
+	b, _ := json.Marshal(map[string]any{"filters": filters, "errors": []string{}, "string": "", "attributes": map[string]any{}})
+	return resp(string(b), "/shodan/host/search/tokens"), nil
+}
+
+func (f *fakeUp) Search(_ context.Context, query, facets string, page int) (*shodan.Response, error) {
+	f.record(fmt.Sprintf("search %s|%s|%d", query, facets, page))
+	if f.credits != nil {
+		*f.credits -= f.charge
+	}
+	if f.searchErr != nil {
+		return nil, f.searchErr
+	}
+	body := `{"total": 2, "matches": [
+	  {"ip_str": "1.2.3.4", "port": 443, "transport": "tcp", "org": "Example Hosting", "location": {"country_code": "JP"},
+	   "hostnames": ["h.example.test"], "product": "ExampleServer", "version": "1.0", "timestamp": "2026-10-09T05:00:00.000000",
+	   "_shodan": {"module": "https"}, "http": {"title": "Welcome"}, "vulns": {"CVE-2000-0001": {}}, "data": "x"},
+	  {"ip_str": "2001:4860:4860::8888", "port": 53, "transport": "udp", "_shodan": {"module": "dns-udp"}, "data": "y", "timestamp": "2026-10-09T04:00:00"}
+	]`
+	if facets != "" {
+		body += `, "facets": {"country": [{"count": 2, "value": "JP"}]}`
+	}
+	return resp(body+"}", "/shodan/host/search"), nil
 }
 
 func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }

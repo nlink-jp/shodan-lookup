@@ -33,6 +33,8 @@ credited to Shodan. Every result names its source in `provenance`.
 | Show me one service of it in full: the banner, the page, the certificate, the CVE summaries | `get_service` |
 | How many services match this query, and which IPs / orgs / countries have the most? | `count_services` |
 | What did it expose over time — when did a port first appear, when did its certificate or product change? | `get_history` |
+| Which services match this query — the rows themselves (spends credits)? | `search_services` |
+| How will Shodan read this query, and what would searching it cost? | `parse_query` |
 | How many query credits are left, and does the key work? | `get_quota` |
 
 A typical pivot: `lookup_host` → a certificate's `sha1` or a
@@ -176,6 +178,55 @@ How to read it:
   saying so — the current record is still available through `lookup_host` —
   and never `not_indexed`.
 
+### parse_query
+
+How Shodan reads a query, and what searching it would cost — without
+spending anything. The query is first checked as a search would check it
+(addresses, filter names, plan restrictions). Argument: `query` (required).
+
+The answer: `filters` (the filter names Shodan recognised), `attributes`,
+`errors`, `free_text` (what is left as text) and
+`predicted_credits_page_1` — 1 when a filter is used, else 0. Page 2 or
+later always costs 1. The prediction matched the actual charge on all three
+measured searches.
+
+### search_services
+
+One page of the services matching a query. **This spends query credits**:
+1 when the query uses a filter or `page` is 2 or later, else 0 (measured;
+never more than 1 per call). Arguments:
+
+- `query` (required): as for `count_services`, checked the same way before
+  anything is sent.
+- `facets`: as for `count_services` (N 1-100).
+- `page`: 1-10, 100 rows each (default 1).
+- `refresh`: search again instead of serving the cached page (cached 24 hours
+  by default) — **this spends credits again**.
+
+The answer: `query`, `page`, `unit` (always `services`), `total`, `rows[]`
+(each `ip`, `port`, `transport`, `module`, `org`, `country_code`,
+`hostnames`, `product`, `version`, `title`, `timestamp`, `vuln_count`),
+`facets[]`, `credits` (`predicted`, `before`, `after`, `spent`, `floor`;
+absent on a cached page, which spends nothing), `provenance`, `notes`, and
+`omitted.rows` when rows had to be left out to fit (the credits are spent
+either way).
+
+How the credits are guarded — by the tool, not by any argument:
+
+- A cached page is served without sending anything.
+- Shodan's own reading of the query (`parse_query`) gives the prediction.
+- The remainder is read first, and the search is refused with `credit_floor`
+  if, counting it as 1 credit whatever the prediction, it would take the
+  remainder below the operator's floor (`[search] credit_floor`, default 20
+  of Membership's 100 a month).
+- The remainder is read again afterwards. If the search spent other than
+  predicted — another process using the key would cause that too — or the
+  spending could not be read, every later uncached search in this process is
+  refused with `credit_mismatch`.
+
+Prefer `count_services` when counts and top values answer the question: it
+is free. A row's full banner is `lookup_host`'s or `get_service`'s.
+
 ### get_quota
 
 The key's `plan` (`dev` is Membership), `plan_name`, `query_credits`,
@@ -208,6 +259,8 @@ Every tool error is a result with `isError: true` whose text is
 | `not_indexed` | Shodan has not observed the IP: its record was absent and a count for `ip:<address>` confirmed zero services | an answer, not a failure — but not evidence that nothing is open; Shodan's crawl is not exhaustive |
 | `not_observed` | the host is indexed, but Shodan has no banner for that port (and transport) | an answer — not evidence that the port is closed; the message lists the ports Shodan did observe |
 | `plan_restricted` | the query uses `vuln` or `tag`, which Shodan withholds from a Membership plan; refused before sending because the restriction does not come back as an error, only as a misleadingly low count | rephrase without that filter or facet (for CVEs, look the host up and read its inferred CVEs) |
+| `credit_floor` | a search would take the remaining query credits below the operator's floor; nothing was sent | use `count_services` (free), or ask the operator; credits renew at the start of each month |
+| `credit_mismatch` | an earlier search in this process spent other than predicted, or its spending could not be read; uncached searches are stopped for the process | ask the operator to check `get_quota` and restart the server; cached pages still answer |
 | `missing_api_key` | no Shodan API key is configured; nothing was sent | the operator sets `key` under `[api]` in the config file, or `SHODAN_LOOKUP_API_KEY` |
 | `auth_failed` | Shodan refused the key (401). Host lookups do not check the key, so a wrong key shows up here, on counts and quota | the operator checks the key; retrying will not help |
 | `bad_request` | Shodan rejected the query (400); `message` carries Shodan's reason | fix the query |

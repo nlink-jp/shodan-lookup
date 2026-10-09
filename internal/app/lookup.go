@@ -80,13 +80,15 @@ func (c *common) setup(version string, stderr io.Writer) (eng *engine.Engine, cf
 	return NewEngine(cfg, version), cfg, true
 }
 
-// exitFor maps a lookup error onto the exit contract. A refused input and a
-// missing or refused key are usage / configuration errors. not_indexed and
+// exitFor maps a lookup error onto the exit contract. A refused input, a
+// missing or refused key, and a search the credit guard refused are usage /
+// configuration errors. not_indexed and
 // not_observed are answers, so they do not fail the run. Everything else
 // means upstream could not be asked, or not fully.
 func exitFor(err error) int {
 	switch engine.Code(err) {
-	case engine.CodeInvalidArgument, engine.CodePlanRestricted, shodan.CodeMissingKey, shodan.CodeAuthFailed:
+	case engine.CodeInvalidArgument, engine.CodePlanRestricted, shodan.CodeMissingKey, shodan.CodeAuthFailed,
+		engine.CodeCreditFloor, engine.CodeCreditMismatch:
 		return exitError
 	case engine.CodeNotIndexed, engine.CodeNotObserved:
 		return exitOK

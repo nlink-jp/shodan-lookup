@@ -18,9 +18,11 @@ IP アドレスがインターネットから見て何を晒しているか — 
 - **否定的な答えを作りません。** Shodan が観測していない IP は「Shodan の索引に
   無い」と返し、「何も開いていない」とは返しません。推定 CVE の一覧が空でも
   「脆弱性が無い」ではありません。
-- **このビルドはクエリクレジットを使いません。** ホスト照会・履歴・件数集計・
-  残量照会は、どれもクレジットを消費しません（実測）。クレジットを使う検索は
-  Phase 2 で入り、設定した下限で守ります。
+- **クレジットはツール側で守ります。** クエリクレジットを使うのは `search`
+  だけです（条件つき、または 2 ページ目以降で 1 ページ 1 クレジット。実測）。
+  どの検索も 1 とみなして、設定した下限を割る検索は送りません。予測と違う
+  消費が起きたら、それ以降の検索を止めます。ホスト照会・履歴・件数集計・
+  残量照会はクレジットを消費しません（実測）。
 
 第三者の索引を読むだけなので、**調査対象のホストにはパケットが届きません**。
 ただし照会はすべて利用者の Shodan アカウントに帰属し、どの IP を・どの検索語で
@@ -31,10 +33,10 @@ IP アドレスがインターネットから見て何を晒しているか — 
 
 ## 状況
 
-[RFP](docs/ja/shodan-lookup-rfp.ja.md) の Phase 1 に履歴を加えて実装済みです:
-`host`・`service`・`count`・`history`・`quota` と、MCP ツール `lookup_host`・
-`get_service`・`count_services`・`get_history`・`get_quota`。クレジットを消費する検索（Phase 2）はこの
-ビルドには入っていません。未リリースです。
+[RFP](docs/ja/shodan-lookup-rfp.ja.md) の Phase 1・2 に履歴を加えて実装済みです:
+`host`・`service`・`count`・`history`・`tokens`・`search`・`quota` と、MCP
+ツール `lookup_host`・`get_service`・`count_services`・`get_history`・
+`parse_query`・`search_services`・`get_quota`。未リリースです。
 
 ## 必要なもの
 
@@ -88,6 +90,8 @@ shodan-lookup host <IP>...             ホストの開放ポート・製品・�
 shodan-lookup service <IP> <PORT>      ホストの 1 サービスを区画ごとに全量まで
 shodan-lookup count <QUERY>            Shodan のクエリに一致するサービスの数と内訳
 shodan-lookup history <IP>             時間を通じて何を晒していたか（ポートごとに、各変化がいつ見えたか）
+shodan-lookup tokens <QUERY>           Shodan がクエリをどう読むかと、検索の消費（無料）
+shodan-lookup search <QUERY>           一致するサービスを 1 ページ — クエリクレジットを消費する
 shodan-lookup quota                    プランと残りのクエリクレジット（常に最新）
 shodan-lookup cache status|clear       結果キャッシュの確認・削除
 shodan-lookup mcp                      ローカル MCP サーバーとして起動（stdio）
@@ -106,6 +110,8 @@ shodan-lookup service 1.2.3.4 53 --transport udp --section banner
 shodan-lookup count 'port:3389 country:JP' --facet org:5 --facet ip:20
 shodan-lookup history 1.2.3.4                             # ポート・製品・タイトル・証明書がいつ変わったか
 shodan-lookup history 1.2.3.4 --port 443 --limit 20       # そのポートの観測を新しい順に
+shodan-lookup tokens 'product:nginx country:JP'           # 無料: 検索すると 1 クレジットかかるか
+shodan-lookup search 'product:nginx country:JP' --facet org:5   # 1 クレジット。消費を stderr に出す
 shodan-lookup quota
 ```
 
@@ -130,6 +136,14 @@ shodan-lookup quota
   開いた時点ではありません。騒がしい 1 つのポートが窓を埋めることがあり、
   答えはそのポートを名指しします。履歴の 404 もホスト照会と同じく裏を取ります
   （Shodan は、サービスを持つ大きなホストの履歴を返さないことがあります）。
+- **`search` はクエリクレジットを消費します**。条件を使うか 2 ページ目以降なら
+  1 ページ 1 クレジット、それ以外は 0 です（実測。1 回で 1 を超えません）。
+  送る前に残量を読み、どの検索も 1 とみなして `[search] credit_floor`（既定 20）を
+  割るなら送らずに拒否します（終了コード 2、`credit_floor`）。送った後に残量を
+  読み直し、消費を stderr に出します。予測と違う消費が起きたら、そのプロセスでは
+  検索を止めます（`credit_mismatch`）。ページは 24 時間キャッシュするので、同じ
+  検索は消費しません。`--refresh` は再び消費します。「何件・どれが多いか」は
+  多くの場合、無料の `count` で答えられます。
 - **時刻は UTC** です。証明書の `expired` は、照会した時点で計算します。
 - **ホスト照会は API キーを検査しません**（実測）。誤ったキーでもホストの記録は
   返ります。キーの誤りは `quota` と `count` で分かります。
@@ -149,7 +163,8 @@ API キーが無いか拒否された。
 }
 ```
 
-ツール: `lookup_host`・`get_service`・`count_services`・`get_history`・`get_quota`・
+ツール: `lookup_host`・`get_service`・`count_services`・`get_history`・
+`parse_query`・`search_services`（クレジットを使う唯一のツール）・`get_quota`・
 `cache_status`・`get_usage`。最初に `get_usage` を呼んでください。全体の
 リファレンスと、エラーからの回復手順の表を返します。`lookup_host` は応答の
 予算内で答えます。既定を超えたサービス・バナー・CVE は `omitted` に件数として

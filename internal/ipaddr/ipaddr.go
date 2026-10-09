@@ -95,7 +95,7 @@ var embeds = []embed{
 var (
 	globalUnicast6 = mustPrefix("2000::/3")
 	unspecified4   = netip.MustParseAddr("0.0.0.0")
-	broadcast4   = netip.MustParseAddr("255.255.255.255")
+	broadcast4     = netip.MustParseAddr("255.255.255.255")
 )
 
 // Classify judges one address. It returns the refused class, or "" when the

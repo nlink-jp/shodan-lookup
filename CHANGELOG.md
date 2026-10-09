@@ -10,6 +10,15 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 - `host`, `service`, `count`, `quota` and the MCP tools `lookup_host`,
   `get_service`, `count_services`, `get_quota` (RFP Phase 1).
+- `tokens` / `search` and the MCP tools `parse_query` / `search_services`
+  (RFP Phase 2). `search` is the only path that spends query credits, and it
+  is guarded by the tool: a cached page sends nothing; Shodan's own reading of
+  the query (tokens, free) predicts the cost; the remainder is read and the
+  search refused (`credit_floor`) if, counted as one credit whatever the
+  prediction, it would cross `[search] credit_floor`; the remainder is read
+  again afterwards, and a spend other than predicted — or one that cannot be
+  read — stops searching for the process (`credit_mismatch`). The CLI prints
+  what was spent on stderr; `search --raw` prints every banner of the page.
 - `history` and the MCP tool `get_history`: per port, the first and last
   sighting and each variant (product, version, page title, certificate
   SHA-1) with when it was seen, inside a stated window — Shodan returns only

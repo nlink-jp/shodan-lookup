@@ -266,16 +266,9 @@ func (s *Server) countServices(ctx context.Context, raw json.RawMessage) (any, e
 	if strings.TrimSpace(a.Query) == "" {
 		return nil, invalidArg("query is required")
 	}
-	specs := make([]engine.FacetSpec, 0, len(a.Facets))
-	for _, f := range a.Facets {
-		spec, err := engine.ParseFacet(f)
-		if err != nil {
-			return nil, err
-		}
-		if spec.N > mcpMaxFacetN {
-			return nil, invalidArg(fmt.Sprintf("facet %q: at most %d values per facet here (the CLI allows %d)", f, mcpMaxFacetN, engine.MaxFacetValues))
-		}
-		specs = append(specs, spec)
+	specs, err := parseFacets(a.Facets)
+	if err != nil {
+		return nil, err
 	}
 	return s.Eng.CountServices(ctx, a.Query, specs, a.Refresh)
 }
@@ -365,4 +358,65 @@ func (s *Server) getHistory(ctx context.Context, raw json.RawMessage) (any, erro
 		}
 	}
 	return out, nil
+}
+
+// compactSearch is search_services' answer: the engine's page with rows
+// thinned, and counted, if the page would cross the soft budget.
+type compactSearch struct {
+	*engine.Search
+	Omitted map[string]int `json:"omitted,omitempty"`
+}
+
+type searchArgs struct {
+	Query   string   `json:"query"`
+	Facets  []string `json:"facets"`
+	Page    int      `json:"page"`
+	Refresh bool     `json:"refresh"`
+}
+
+func (s *Server) searchServices(ctx context.Context, raw json.RawMessage) (any, error) {
+	var a searchArgs
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(a.Query) == "" {
+		return nil, invalidArg("query is required")
+	}
+	specs, err := parseFacets(a.Facets)
+	if err != nil {
+		return nil, err
+	}
+	res, err := s.Eng.SearchServices(ctx, engine.SearchQuery{Query: a.Query, Facets: specs, Page: a.Page}, a.Refresh)
+	if err != nil {
+		return nil, err
+	}
+	out := &compactSearch{Search: res}
+	capStrings(out)
+	dropped := 0
+	for over(out) && len(res.Rows) > 1 {
+		drop := (len(res.Rows) + 1) / 2
+		dropped += drop
+		res.Rows = res.Rows[:len(res.Rows)-drop]
+	}
+	if dropped > 0 {
+		out.Omitted = map[string]int{"rows": dropped}
+		res.Notes = append(res.Notes, "rows were left out to fit the response (omitted.rows); the credits are spent — the CLI's search --json holds the whole page")
+	}
+	return out, nil
+}
+
+// parseFacets reads MCP facet specs, held to the MCP bound.
+func parseFacets(in []string) ([]engine.FacetSpec, error) {
+	specs := make([]engine.FacetSpec, 0, len(in))
+	for _, f := range in {
+		spec, err := engine.ParseFacet(f)
+		if err != nil {
+			return nil, err
+		}
+		if spec.N > mcpMaxFacetN {
+			return nil, invalidArg(fmt.Sprintf("facet %q: at most %d values per facet here (the CLI allows %d)", f, mcpMaxFacetN, engine.MaxFacetValues))
+		}
+		specs = append(specs, spec)
+	}
+	return specs, nil
 }

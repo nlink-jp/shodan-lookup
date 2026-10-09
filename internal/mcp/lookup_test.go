@@ -25,6 +25,8 @@ type fakeEngine struct {
 	rich       int // title length on every service, with HTTP and TLS blocks
 	hostnames  int
 	histPorts  int // ports in the history; 0: one port
+	rows       int
+	gotSearch  engine.SearchQuery
 }
 
 func (f *fakeEngine) LookupHost(_ context.Context, ip string, _ bool) (*engine.Host, error) {
@@ -86,6 +88,24 @@ func (f *fakeEngine) GetHistory(_ context.Context, q engine.HistoryQuery, _ bool
 		h.Ports = append(h.Ports, p)
 	}
 	return h, nil
+}
+
+func (f *fakeEngine) ParseQuery(_ context.Context, q string) (*engine.QueryReading, error) {
+	return &engine.QueryReading{Query: q, Filters: []string{"port"}, PredictedCost: 1}, nil
+}
+
+func (f *fakeEngine) SearchServices(_ context.Context, q engine.SearchQuery, _ bool) (*engine.Search, error) {
+	f.gotSearch = q
+	if f.err != nil {
+		return nil, f.err
+	}
+	res := &engine.Search{Query: q.Query, Page: max(q.Page, 1), Unit: "services", Total: 1000, Rows: []engine.Row{}}
+	for i := 0; i < f.rows; i++ {
+		res.Rows = append(res.Rows, engine.Row{IP: "1.2.3.4", Port: i, Transport: "tcp", Title: strings.Repeat("t", f.rich), Hostnames: []string{strings.Repeat("h", f.rich)}})
+	}
+	one := 1
+	res.Credits = &engine.Credits{Predicted: 1, Before: 50, After: &one, Spent: &one, Floor: 20}
+	return res, nil
 }
 
 func (f *fakeEngine) GetQuota(context.Context) (*engine.Quota, error) {
@@ -414,5 +434,51 @@ func TestAWideHistoryIsThinnedNotWithheld(t *testing.T) {
 	}
 	if om, _ := m["omitted"].(map[string]any); om["variants"] == nil {
 		t.Errorf("nothing was counted as omitted: %v", m["omitted"])
+	}
+}
+
+func TestSearchServicesPassesThroughAndCountsThinning(t *testing.T) {
+	eng := &fakeEngine{rows: 100, rich: 900}
+	m, text, isErr := call(t, lookupServer(t, eng), ToolSearchServices, `{"query":"port:443","facets":["country:5"],"page":2}`)
+	if isErr {
+		t.Fatalf("%.200s", text)
+	}
+	if eng.gotSearch.Page != 2 || len(eng.gotSearch.Facets) != 1 || eng.gotSearch.Facets[0].N != 5 {
+		t.Errorf("arguments: %+v", eng.gotSearch)
+	}
+	if len(text) > maxResultBytes {
+		t.Errorf("result %d bytes", len(text))
+	}
+	if m["credits"] == nil {
+		t.Error("the credits block is missing")
+	}
+	kept := len(m["rows"].([]any))
+	if om, _ := m["omitted"].(map[string]any); kept == 100 || kept+int(om["rows"].(float64)) != 100 {
+		t.Errorf("kept %d, omitted %v", kept, m["omitted"])
+	}
+}
+
+func TestSearchServicesArguments(t *testing.T) {
+	s := lookupServer(t, &fakeEngine{rows: 1})
+	for _, args := range []string{`{}`, `{"query":""}`, `{"query":"port:1","facets":["ip:101"]}`, `{"query":"port:1","limit":5}`} {
+		if _, text, isErr := call(t, s, ToolSearchServices, args); !isErr || !strings.Contains(text, CodeInvalidArgument) {
+			t.Errorf("%s: %s", args, text)
+		}
+	}
+	m, text, isErr := call(t, s, ToolParseQuery, `{"query":"port:443"}`)
+	if isErr || m["predicted_credits_page_1"] != 1.0 {
+		t.Errorf("parse_query: %s", text)
+	}
+	if _, _, isErr := call(t, s, ToolParseQuery, `{}`); !isErr {
+		t.Error("parse_query without a query was accepted")
+	}
+}
+
+func TestCreditCodesPassThrough(t *testing.T) {
+	for _, code := range []string{engine.CodeCreditFloor, engine.CodeCreditMismatch} {
+		s := lookupServer(t, &fakeEngine{err: &engine.Error{Code: code, Message: "x"}})
+		if _, text, isErr := call(t, s, ToolSearchServices, `{"query":"port:443"}`); !isErr || !strings.Contains(text, `"code":"`+code+`"`) {
+			t.Errorf("%s: %s", code, text)
+		}
 	}
 }

@@ -355,11 +355,11 @@ func TestParseValue(t *testing.T) {
 // parser read as something, silently.
 func TestTheParserRefusesWhatItDoesNotUnderstand(t *testing.T) {
 	for _, body := range []string{
-		"[api]\nkey = \"a\"\nkey = \"b\"\n",          // a duplicate key
+		"[api]\nkey = \"a\"\nkey = \"b\"\n",                           // a duplicate key
 		"[cache]\nhost_ttl_hours = 1\n[cache]\ncount_ttl_hours = 1\n", // a duplicate section
-		"[api]\nkey = \"abc\" trailing\n",               // text after a closed value
-		"[api]\nkey = \"abc\n",                           // an unclosed quote
-		"[api] junk\nkey = \"a\"\n",                      // text after a header
+		"[api]\nkey = \"abc\" trailing\n",                             // text after a closed value
+		"[api]\nkey = \"abc\n",                                        // an unclosed quote
+		"[api] junk\nkey = \"a\"\n",                                   // text after a header
 	} {
 		dir := isolate(t)
 		_, err := Load(writeConfig(t, dir, body), 0)

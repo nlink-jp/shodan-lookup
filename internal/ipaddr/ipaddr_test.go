@@ -207,23 +207,23 @@ func TestCheckQueryJudgesIPAndNetValues(t *testing.T) {
 // must now be refused before anything is sent.
 func TestQueriesThatSlippedPastTheTermCheck(t *testing.T) {
 	for _, q := range []string{
-		"foo\u3000ip:10.0.0.1",     // ideographic space as a separator
-		"foo\vip:10.0.0.1",         // vertical tab
-		"foo\fip:10.0.0.1",         // form feed
-		"foo\u00a0ip:10.0.0.1",     // no-break space
-		"port:22\nip:10.0.0.1",     // a line break
-		"+ip:10.0.0.1",             // a prefix before the filter
-		"(ip:10.0.0.1)",            // parentheses
-		"10.0.0.1",                 // a bare address
-		"hostname:10.0.0.1",        // an address as another filter's value
-		`http.html:"192.168.1.1"`,  // inside quotes
-		"apache 172.16.0.0/12",     // a prefix in free text
-		"ssh fe80::1",              // IPv6 link-local in free text
-		"x ::1",                    // loopback in free text
-		"+ip:fe80::1",              // IPv6 behind a prefix
-		"hostname:fe80::1",         // IPv6 as another filter's value
-		"010.000.000.001",          // a zero-padded dotted quad cannot be judged
-		"port:22 \u202e",           // a bidi control
+		"foo\u3000ip:10.0.0.1",    // ideographic space as a separator
+		"foo\vip:10.0.0.1",        // vertical tab
+		"foo\fip:10.0.0.1",        // form feed
+		"foo\u00a0ip:10.0.0.1",    // no-break space
+		"port:22\nip:10.0.0.1",    // a line break
+		"+ip:10.0.0.1",            // a prefix before the filter
+		"(ip:10.0.0.1)",           // parentheses
+		"10.0.0.1",                // a bare address
+		"hostname:10.0.0.1",       // an address as another filter's value
+		`http.html:"192.168.1.1"`, // inside quotes
+		"apache 172.16.0.0/12",    // a prefix in free text
+		"ssh fe80::1",             // IPv6 link-local in free text
+		"x ::1",                   // loopback in free text
+		"+ip:fe80::1",             // IPv6 behind a prefix
+		"hostname:fe80::1",        // IPv6 as another filter's value
+		"010.000.000.001",         // a zero-padded dotted quad cannot be judged
+		"port:22 \u202e",          // a bidi control
 	} {
 		if _, err := CheckQuery(q); err == nil {
 			t.Errorf("%q: accepted", q)

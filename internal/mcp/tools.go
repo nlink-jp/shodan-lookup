@@ -15,6 +15,8 @@ const (
 	ToolGetService    = "get_service"
 	ToolCountServices = "count_services"
 	ToolGetHistory    = "get_history"
+	ToolParseQuery     = "parse_query"
+	ToolSearchServices = "search_services"
 	ToolGetQuota      = "get_quota"
 	ToolCacheStatus   = "cache_status"
 	ToolGetUsage      = "get_usage"
@@ -42,7 +44,9 @@ const instructions = `shodan-lookup answers what an IP address exposes to the In
 	`error-recovery table. lookup_host answers "what does this IP expose"; get_service reads one service of it in ` +
 	`full, section by section; count_services answers "how many services match this Shodan query", with ` +
 	`breakdowns — its unit is services, not hosts; get_history answers "what did it expose over time, and when ` +
-	`did that change" within a window Shodan caps at the latest 1,000 banners; get_quota reads the plan and ` +
+	`did that change" within a window Shodan caps at the latest 1,000 banners; search_services lists one page of ` +
+	`matching services and is the only tool that spends query credits — parse_query predicts the cost for free; ` +
+	`get_quota reads the plan and ` +
 	`remaining query credits. Only a ` +
 	`third-party index is read, so no packet reaches the host under investigation, but every query is attributed ` +
 	`to the operator's Shodan account, and a non-public IP address is refused wherever it appears in an ` +
@@ -58,6 +62,8 @@ type Engine interface {
 	GetService(ctx context.Context, q engine.ServiceQuery, refresh bool) (*engine.Page, error)
 	CountServices(ctx context.Context, query string, facets []engine.FacetSpec, refresh bool) (*engine.Count, error)
 	GetHistory(ctx context.Context, q engine.HistoryQuery, refresh bool) (*engine.History, error)
+	ParseQuery(ctx context.Context, query string) (*engine.QueryReading, error)
+	SearchServices(ctx context.Context, q engine.SearchQuery, refresh bool) (*engine.Search, error)
 	GetQuota(ctx context.Context) (*engine.Quota, error)
 }
 
@@ -144,6 +150,31 @@ func toolDefinitions() []map[string]any {
 			}, "ip"),
 		},
 		{
+			"name": ToolParseQuery,
+			"description": "How Shodan reads a search query, and what searching it would cost, without spending anything: " +
+				"the filters Shodan recognises, the free text left over, and predicted_credits_page_1 (1 when a filter is " +
+				"used, else 0; page 2 or later always costs 1). The query is checked as a search would check it first.",
+			"inputSchema": obj(map[string]any{
+				"query": str("A Shodan search query."),
+			}, "query"),
+		},
+		{
+			"name": ToolSearchServices,
+			"description": "One page (up to 100) of the services matching a Shodan query, as compact rows (ip, port, product, " +
+				"version, title, org, country, when observed, vuln_count) with optional facets. THIS SPENDS QUERY CREDITS: " +
+				"1 when the query uses a filter or page is 2 or later, else 0 (measured; never more than 1 per call). The " +
+				"tool refuses a search that would take the remaining credits below the operator's floor (credit_floor), " +
+				"counting every search as 1, and stops searching for the process if a search ever spends other than " +
+				"predicted (credit_mismatch). A cached page spends nothing. Prefer count_services — free — when counts " +
+				"and top values answer the question; use lookup_host for a row's full banner.",
+			"inputSchema": obj(map[string]any{
+				"query":   str("A Shodan search query, e.g. 'product:nginx country:JP'."),
+				"facets":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Breakdowns as \"name\" or \"name:N\" (N 1-100, default 10)."},
+				"page":    integer("Page 1-10, 100 rows each (default 1). Page 2 or later costs 1 credit even without a filter."),
+				"refresh": boolean("Bypass the local cache and search again — this spends credits again (default false)."),
+			}, "query"),
+		},
+		{
 			"name":        ToolGetQuota,
 			"description": "The key's plan and remaining query credits, always live (never cached). Also the way to see whether the key works: host lookups do not check it.",
 			"inputSchema": obj(map[string]any{}),
@@ -173,6 +204,19 @@ func (s *Server) dispatch(ctx context.Context, name string, args json.RawMessage
 		return s.countServices(ctx, args)
 	case ToolGetHistory:
 		return s.getHistory(ctx, args)
+	case ToolParseQuery:
+		var a struct {
+			Query string `json:"query"`
+		}
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
+		if a.Query == "" {
+			return nil, invalidArg("query is required")
+		}
+		return s.Eng.ParseQuery(ctx, a.Query)
+	case ToolSearchServices:
+		return s.searchServices(ctx, args)
 	case ToolGetQuota:
 		if err := decodeArgs(args, &struct{}{}); err != nil {
 			return nil, err

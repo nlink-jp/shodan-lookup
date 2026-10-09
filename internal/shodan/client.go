@@ -169,6 +169,25 @@ func (c *Client) Count(ctx context.Context, query, facets string) (*Response, er
 	return c.get(ctx, "/shodan/host/count", q)
 }
 
+// Tokens asks Shodan how it reads a query: GET /shodan/host/search/tokens
+// (credit-free, measured). Its filters list is what the credit prediction is
+// made from.
+func (c *Client) Tokens(ctx context.Context, query string) (*Response, error) {
+	return c.get(ctx, "/shodan/host/search/tokens", url.Values{"query": {query}})
+}
+
+// Search fetches one page of matching banners: GET /shodan/host/search.
+// It SPENDS QUERY CREDITS — 1 when the query uses a filter or page is 2 or
+// later (measured: never more than 1 per call). Only the engine's credit
+// guard may call it.
+func (c *Client) Search(ctx context.Context, query, facets string, page int) (*Response, error) {
+	q := url.Values{"query": {query}, "page": {strconv.Itoa(page)}}
+	if facets != "" {
+		q.Set("facets", facets)
+	}
+	return c.get(ctx, "/shodan/host/search", q)
+}
+
 // Filters fetches the names Shodan accepts as search filters:
 // GET /shodan/host/search/filters (credit-free).
 func (c *Client) Filters(ctx context.Context) (*Response, error) {
