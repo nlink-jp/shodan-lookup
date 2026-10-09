@@ -135,9 +135,13 @@ the Phase 1 measurements"; the essentials:
   means — unmeasured.
 - **No rate-limit headers** (Cloudflare in front). Documented 1 req/s.
 - **Credit-free (measured)**: host lookup (with or without history), `count`
-  with filters and facets, `tokens`, the filter and facet lists. Search costs
-  1 credit with a filter or past page 1 (documented); page-2 accounting is
-  unmeasured (Phase 2, with approval).
+  with filters and facets, `tokens`, the filter and facet lists, and an
+  unfiltered search page 1 even with facets.
+- **Search costs (measured 2026-10-09, 2 credits spent with approval)**:
+  filtered page 1 → 1, filtered page 2 → 1 (not 2). `tokens` predicted all
+  three. `query_credits` and `unlocked_left` drop together and show the
+  charge at once. A page is up to 9.3 MB (100 banners); `total` moves
+  between pages.
 - **Terms**: `https://static.shodan.io/legal/terms.html`, read 2026-10-09
   (sha256 and reading in RFP §7). Re-check the hash before each release.
 - The config used for the measurements first held a top-level `api_key`;

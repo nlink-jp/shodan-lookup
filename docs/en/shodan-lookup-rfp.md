@@ -431,6 +431,27 @@ The implementation was verified independently on a pinned worktree. The findings
   - Whether Shodan clips header values is unmeasured.
 - Out-of-scope observations (the siblings' lenient TOML parser, and Phase 2's unbuilt state not being machine-guarded) are left for release preparation.
 
+## Phase 2 measurements (2026-10-09, credit-spending, approved by the operator in advance, budget 4)
+
+Credits actually spent: 2 (100 → 98). The raw record is kept outside the repository.
+
+| query | cost | response | tokens prediction |
+|---|---|---|---|
+| facets only (`apache`, facets `country:3`, no filter, page 1) | 0 | 9.3 MB, 100 matches | no filter → 0 (matched) |
+| filtered page 1 (`product:nginx country:JP`) | 1 | 3.3 MB, 100 matches | 2 filters → 1 (matched) |
+| the same query, page 2 | **1** (not 2) | 1.9 MB, 100 matches | matched |
+
+- `query_credits` and `unlocked_left` dropped together and showed the charge immediately (0 s), unchanged at 5 s and 15 s. The remainder is read from `query_credits`, and the post-call read need not wait.
+- One search cost at most 1, whatever its filters and page. An unfiltered page 2 or later costs 1 per the documentation (unmeasured).
+- The prediction "1 if tokens reports any filter or the page is 2 or later, else 0" matched the actual cost all three times.
+- A search answers with `matches` (the banners themselves, 100 per page), `total`, and `facets` when asked. A page measured up to 9.3 MB, so rows are a compact projection; banners in full come from lookup_host or get_service.
+- `total` moved between pages (2,947,151 → 2,947,605). The index is live, so paging may shift, and the answer says so.
+
+**Design settled by this**:
+
+- `search_services` takes `page` (1–10). A call was measured to cost at most 1, which keeps §2's one credit per call. The cap of 10 is conservative against the Membership website's 20 pages; costs past page 2 are unmeasured.
+- The floor is checked on every call as if it cost 1, even when the prediction is 0 (the design-verification M1 decision). A cache hit sends nothing and checks nothing.
+
 ---
 
 ## Discussion Log
