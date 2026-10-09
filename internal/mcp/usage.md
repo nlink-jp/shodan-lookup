@@ -32,10 +32,12 @@ credited to Shodan. Every result names its source in `provenance`.
 | How many services match this query, and which IPs / orgs / countries have the most? | `count_services` |
 | How many query credits are left, and does the key work? | `get_quota` |
 
-A typical pivot: `lookup_host` → a certificate SHA-256 or a favicon hash →
-`count_services` with `ssl.cert.fingerprint:<sha256>` or
+A typical pivot: `lookup_host` → a certificate's `sha1` or a
+`favicon_hash` → `count_services` with `ssl.cert.fingerprint:<sha1>` or
 `http.favicon.hash:<hash>` and facets `["ip:20"]` → `lookup_host` on those
-IPs. Inferred CVE IDs continue to cve-lookup.
+IPs. The fingerprint filter matches SHA-1 only: a SHA-256 matches nothing
+without an error (measured), so it is refused. Inferred CVE IDs continue to
+cve-lookup.
 
 ## Reading the answers
 
@@ -85,8 +87,8 @@ when anything was left out.
 Each service: `port`, `transport`, `module`, `timestamp`,
 `observed_hours_ago`, `product`, `version`, `cpe23`, `http` (`status`,
 `title`, `server`, `location`, `html_chars`), `ssl` (`subject_cn`,
-`issuer_cn`, `not_before`, `not_after`, `expired`, `expired_as_of`, `sha256`,
-`versions`), `banner` (shortened to 512 bytes by default), `banner_chars` (the
+`issuer_cn`, `not_before`, `not_after`, `expired`, `expired_as_of`, `sha1`
+— the value `ssl.cert.fingerprint:` matches — `sha256`, `versions`), `banner` (shortened to 512 bytes by default), `banner_chars` (the
 full length), `favicon_hash`, `tags`, `vuln_count`, and `sections` — the name
 and size of each part `get_service` can return.
 

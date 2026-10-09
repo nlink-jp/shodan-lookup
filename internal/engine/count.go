@@ -149,6 +149,9 @@ func (e *Engine) checkNames(ctx context.Context, terms []ipaddr.Term, facets []F
 			return planRestricted("filter", t.Filter)
 		}
 		filterNames = append(filterNames, t.Filter)
+		if err := checkValue(t); err != nil {
+			return err
+		}
 	}
 	seen := map[string]bool{}
 	for _, f := range facets {
@@ -183,6 +186,31 @@ func (e *Engine) checkNames(ctx context.Context, terms []ipaddr.Term, facets []F
 		}
 	}
 	return nil
+}
+
+// checkValue refuses filter values that were measured to match nothing
+// without an error.
+func checkValue(t ipaddr.Term) error {
+	if t.Filter != "ssl.cert.fingerprint" {
+		return nil
+	}
+	for v := range strings.SplitSeq(t.Value, ",") {
+		if len(v) == 64 && isHex(v) {
+			return invalid("ssl.cert.fingerprint matches a certificate's SHA-1 (40 hex digits); a SHA-256 matches nothing, without an error (measured). Use the sha1 that lookup_host reports")
+		}
+	}
+	return nil
+}
+
+func isHex(s string) bool {
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c >= '0' && c <= '9', c >= 'a' && c <= 'f', c >= 'A' && c <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func planRestricted(kind, name string) error {

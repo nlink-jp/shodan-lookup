@@ -78,6 +78,7 @@ type SSL struct {
 	NotAfter    string   `json:"not_after,omitempty"`
 	Expired     *bool    `json:"expired,omitempty"`
 	ExpiredAsOf string   `json:"expired_as_of,omitempty"`
+	SHA1        string   `json:"sha1,omitempty"` // what ssl.cert.fingerprint: matches (measured)
 	SHA256      string   `json:"sha256,omitempty"`
 	Versions    []string `json:"versions,omitempty"`
 }
@@ -305,7 +306,8 @@ func projectSSL(ws *wireSSL, now time.Time) *SSL {
 	if len(ws.Cert) == 0 || json.Unmarshal(ws.Cert, &c) != nil {
 		return out
 	}
-	out.SubjectCN, out.IssuerCN, out.SHA256 = nameField(c.Subject, "CN"), nameField(c.Issuer, "CN"), c.Fingerprint.SHA256
+	out.SubjectCN, out.IssuerCN = nameField(c.Subject, "CN"), nameField(c.Issuer, "CN")
+	out.SHA1, out.SHA256 = c.Fingerprint.SHA1, c.Fingerprint.SHA256
 	if t, ok := certTime(c.Issued); ok {
 		out.NotBefore = t.Format(time.RFC3339)
 	}

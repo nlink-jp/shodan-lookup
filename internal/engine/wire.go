@@ -68,6 +68,7 @@ type wireCert struct {
 	Issued      string                     `json:"issued"`
 	Expires     string                     `json:"expires"`
 	Fingerprint struct {
+		SHA1   string `json:"sha1"`
 		SHA256 string `json:"sha256"`
 	} `json:"fingerprint"`
 }

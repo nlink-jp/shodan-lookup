@@ -115,6 +115,9 @@ the Phase 1 measurements"; the essentials:
 - **Timestamps are UTC** (newest observation 2–30 min before `Date`, 3/3) and
   carry no suffix (`2026-10-09T05:01:41.136770`).
 - **IPv6 works**, abbreviated or not.
+- **`ssl.cert.fingerprint:` matches SHA-1 only** — a SHA-256 returns 200
+  with 0 results (the same certificate's SHA-1: 17,384). Refused locally.
+  `http.favicon.hash:<favicon_hash>` works.
 - **Sizes**: 8.8.8.8 19 KB; 1.1.1.1 316 KB (one service 92 KB — `http.html`
   59 KB, `http.favicon.data` 21 KB); a vulnerable host 991 KB with 138 CVEs,
   the same 225 KB `vulns` dict repeated in two services. `minify=true` returns

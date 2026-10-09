@@ -20,15 +20,17 @@ adheres to [Semantic Versioning](https://semver.org/).
   - Filter and facet names are checked against Shodan's own lists; `vuln`
     and `tag` are refused (`plan_restricted`).
   - Counts are reported in services, not hosts.
+  - The certificate pivot is SHA-1: lookup_host reports `sha1`, and a
+    SHA-256 given to `ssl.cert.fingerprint:` — which matches nothing without
+    an error (measured) — is refused.
   - MCP answers are budgeted (services, banners after escaping, CVEs) with
     every drop counted in `omitted`; `get_service` pages every section in
     full with a `doc_id`.
   - Text output is made inert as a whole: banners are written by the host
     under investigation.
-- Project scaffold (Phase 2 of the RFP): `version` / `--version` / `-v`
-  (identical output), `help`, `cache status` / `cache clear`, and `mcp` with
-  `cache_status` and `get_usage`. The lookup commands `host`, `service`,
-  `count` and `quota` are placeholders that exit 2 with "not implemented yet".
+- `version` / `--version` / `-v` (identical output), `help`,
+  `cache status` / `cache clear`, `mcp`, and the MCP tools `cache_status` and
+  `get_usage`.
 - Strict configuration: `[api]` / `[query]` / `[search]` / `[cache]` /
   `[network]` / `[limits]`, `SHODAN_LOOKUP_*` environment overrides and the
   `SHODAN_API_KEY` alias. Unknown sections and keys, keys outside a section

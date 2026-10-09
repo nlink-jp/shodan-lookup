@@ -32,7 +32,7 @@ const hostFixture = `{
      "ssl": {"versions": ["TLSv1.3"], "chain": ["-----BEGIN CERTIFICATE-----\nAAA\n-----END CERTIFICATE-----\n", "second"],
              "cert": {"subject": {"CN": "host.example.test"}, "issuer": {"CN": "Example CA", "O": ["Example", "Org"]},
                       "issued": "20250101000000Z", "expires": "20260101000000Z", "expired": false,
-                      "serial": 123456789012345678901234567890, "fingerprint": {"sha256": "abcd"}}},
+                      "serial": 123456789012345678901234567890, "fingerprint": {"sha1": "f00d", "sha256": "abcd"}}},
      "vulns": {"CVE-2000-0001": {"cvss": 5.0, "cvss_version": 3.1, "epss": 0.01, "verified": false, "summary": "first", "references": ["https://example.test/1"]},
                "CVE-2000-0002": {"cvss": 9.8, "cvss_version": 3.1, "epss": 0.5, "verified": false, "summary": "second", "references": []}}},
     {"port": 22, "transport": "tcp", "timestamp": "2026-10-08T05:00:00", "product": "ExampleSSH",
@@ -177,7 +177,8 @@ func TestLookupHostProjects(t *testing.T) {
 	}
 	// Expired is computed now, not taken from the observation ("expired": false).
 	if s := https.SSL; s == nil || s.Expired == nil || !*s.Expired || s.ExpiredAsOf != "2026-10-09T07:00:00Z" ||
-		s.NotAfter != "2026-01-01T00:00:00Z" || s.SubjectCN != "host.example.test" || s.IssuerCN != "Example CA" {
+		s.NotAfter != "2026-01-01T00:00:00Z" || s.SubjectCN != "host.example.test" || s.IssuerCN != "Example CA" ||
+		s.SHA1 != "f00d" || s.SHA256 != "abcd" {
 		t.Errorf("ssl: %+v", https.SSL)
 	}
 	// Vulns: union of services and the host list, highest CVSS first; verified
@@ -392,6 +393,7 @@ func TestCountChecksNamesBeforeSending(t *testing.T) {
 	ctx := context.Background()
 
 	for q, code := range map[string]string{
+		"ssl.cert.fingerprint:" + strings.Repeat("ab", 32): CodeInvalidArgument, // a SHA-256 matches nothing (measured)
 		"nosuchfilter:x":     CodeInvalidArgument,
 		"Port:22":            CodeInvalidArgument,
 		"vuln:CVE-2021-0001": CodePlanRestricted,
@@ -477,5 +479,16 @@ func TestCodeClassifiesEveryLayer(t *testing.T) {
 	}
 	if Code(&shodan.Error{Code: shodan.CodeTimeout}) != shodan.CodeTimeout {
 		t.Error("client codes do not pass through")
+	}
+}
+
+// The fingerprint filter takes SHA-1; a SHA-1 passes the check.
+func TestASHA1FingerprintIsSent(t *testing.T) {
+	up := newFake()
+	up.filters = append(up.filters, "ssl.cert.fingerprint")
+	up.totals["ssl.cert.fingerprint:"+strings.Repeat("a1", 20)] = 7
+	c, err := testEngine(t, up).CountServices(context.Background(), "ssl.cert.fingerprint:"+strings.Repeat("a1", 20), nil, false)
+	if err != nil || c.Total != 7 {
+		t.Errorf("sha1 pivot: %+v %v", c, err)
 	}
 }

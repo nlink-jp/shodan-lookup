@@ -366,6 +366,10 @@ The "measure before implementing" items of §4 Phase 1 were measured with 49 cre
 10. **Facet sizes**: `ip:1000` returned 1,000 entries (39 KB), and `org:1000` returned all 663. A ceiling above 1,000 is unmeasured. MCP allows up to 100 entries per facet, the CLI up to 1,000.
 11. No host with hundreds of services could be found by credit-free means; the top of `port:65535` was about 1 KB. This stays unmeasured, and the caps and counts cover it.
 12. Responses carry no rate-limit headers (re-confirmed), and they come through Cloudflare.
+13. **The certificate pivot takes SHA-1 only** (checked against Shodan after Phase 1 was implemented, credit-free).
+    - `ssl.cert.fingerprint:` with a SHA-256 returned 200 with 0 results; the same certificate's SHA-1 returned 17,384.
+    - A SHA-256 therefore reads as "nothing matched", so a 64-hex-digit value is refused with `invalid_argument` before sending, and the projection gains `sha1`.
+    - `http.favicon.hash:` with the projection's `favicon_hash` worked as is (15 results).
 
 ---
 
