@@ -66,6 +66,21 @@ func TestHistorySummarisesChangesOverAStatedWindow(t *testing.T) {
 	}
 }
 
+// Half the banners on one port is a fact; "the window is short because of
+// it" is only true when the cap cut the window.
+func TestADominantPortShortensOnlyACappedWindow(t *testing.T) {
+	up := newFake()
+	up.histories["1.2.3.4"] = historyBody(300) // 304 banners, under the cap
+	h, err := testEngine(t, up).GetHistory(context.Background(), HistoryQuery{IP: "1.2.3.4"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes := strings.Join(h.Notes, " ")
+	if h.Window.Dominant == nil || strings.Contains(notes, "short because") || !strings.Contains(notes, "53/udp holds 300") {
+		t.Errorf("dominant %+v, notes %v", h.Window.Dominant, h.Notes)
+	}
+}
+
 func TestHistoryUnderTheCapDoesNotClaimCompleteness(t *testing.T) {
 	up := newFake()
 	up.histories["1.2.3.4"] = historyBody(0)
@@ -134,4 +149,8 @@ func TestHistory404IsCrossChecked(t *testing.T) {
 	up.totals["ip:5.6.7.8"] = 0
 	_, err = e.GetHistory(context.Background(), HistoryQuery{IP: "5.6.7.8"}, false)
 	wantCode(t, err, CodeNotIndexed)
+	// A count reads the current index; it cannot vouch for the past.
+	if strings.Contains(err.Error(), "has not observed it") || !strings.Contains(err.Error(), "cannot be told") {
+		t.Errorf("history not_indexed claims too much: %v", err)
+	}
 }

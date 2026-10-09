@@ -56,6 +56,7 @@ type fakeUp struct {
 	tokensErr       error
 	searchErr       error
 	apiInfoErrAfter int // when > 0, /api-info fails after this many calls
+	searchBody      string // when set, the search answers this body
 	hostErr         map[string]error
 	totals          map[string]int // count query -> total
 	countErr        error
@@ -179,6 +180,9 @@ func (f *fakeUp) Search(_ context.Context, query, facets string, page int) (*sho
 	}
 	if f.searchErr != nil {
 		return nil, f.searchErr
+	}
+	if f.searchBody != "" {
+		return resp(f.searchBody, "/shodan/host/search"), nil
 	}
 	body := `{"total": 2, "matches": [
 	  {"ip_str": "1.2.3.4", "port": 443, "transport": "tcp", "org": "Example Hosting", "location": {"country_code": "JP"},

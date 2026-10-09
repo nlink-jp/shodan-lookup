@@ -439,7 +439,7 @@ func TestHistory(t *testing.T) {
 	}
 	assertInert(t, "history --raw", raw)
 
-	if out, _, code := runCLI("history", "5.6.7.8"); code != exitOK || !strings.Contains(out, "not in Shodan's index") {
+	if out, _, code := runCLI("history", "5.6.7.8"); code != exitOK || !strings.Contains(out, "not in Shodan's current index") {
 		t.Errorf("unindexed: exit %d %s", code, out)
 	}
 	for _, args := range [][]string{{"history"}, {"history", "1.2.3.4", "--limit", "5"}, {"history", "1.2.3.4", "--port", "443", "--raw"}, {"history", "1.2.3.4", "--port", "0"}} {

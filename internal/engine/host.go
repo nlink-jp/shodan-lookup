@@ -169,6 +169,11 @@ func (e *Engine) hostError(ctx context.Context, ip string, err error, what strin
 	case n > 0:
 		return &shodan.Error{Code: shodan.CodeUpstream, Status: 404, Message: fmt.Sprintf(
 			"Shodan holds %d service(s) for %s but did not return %s (it answered \"no information\"); this is not a negative answer%s", n, ip, what, retryHint(what))}
+	case what == "its history":
+		// A count reads the current index; an address seen only in the past
+		// would count 0 too, so this cannot say "never observed".
+		return &Error{Code: CodeNotIndexed, Message: fmt.Sprintf(
+			"%s is not in Shodan's current index (a count for ip:%s found 0 services) and Shodan returned no history for it; whether it was observed in the past cannot be told from here", ip, ip)}
 	default:
 		return &Error{Code: CodeNotIndexed, Message: fmt.Sprintf(
 			"%s is not in Shodan's index: Shodan has not observed it (a count for ip:%s found 0 services). This is not evidence that nothing is open", ip, ip)}

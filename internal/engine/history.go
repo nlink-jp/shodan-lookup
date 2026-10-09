@@ -179,7 +179,11 @@ func (e *Engine) GetHistory(ctx context.Context, q HistoryQuery, refresh bool) (
 		h.Notes = append(h.Notes, fmt.Sprintf("Shodan returned %d banners, under its %d cap; whether that is all the history it keeps is not documented", h.Window.Banners, HistoryCap))
 	}
 	if d := h.Window.Dominant; d != nil {
-		h.Notes = append(h.Notes, fmt.Sprintf("%d/%s holds %d of the %d banners; the window is short because of it", d.Port, d.Transport, d.Banners, len(banners)))
+		if h.Window.Capped {
+			h.Notes = append(h.Notes, fmt.Sprintf("%d/%s holds %d of the %d banners; the window is short because of it", d.Port, d.Transport, d.Banners, len(banners)))
+		} else {
+			h.Notes = append(h.Notes, fmt.Sprintf("%d/%s holds %d of the %d banners", d.Port, d.Transport, d.Banners, len(banners)))
+		}
 	}
 	h.Notes = append(h.Notes, "a new variant is a change in product, version, page title or certificate; the CLI's history --raw holds every banner in full")
 

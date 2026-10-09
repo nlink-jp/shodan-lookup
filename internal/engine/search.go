@@ -233,18 +233,27 @@ func (e *Engine) SearchServices(ctx context.Context, q SearchQuery, refresh bool
 	default:
 		spent := before - after
 		credits.After, credits.Spent = &after, &spent
-		if spent != predicted {
+		// A search that failed and was not charged spent what a failure
+		// should; only a charge that differs from the prediction — or any
+		// charge for a failure beyond the prediction — means the guard's
+		// model is wrong.
+		failedFree := serr != nil && spent == 0
+		if spent != predicted && !failedFree {
 			e.halt(fmt.Sprintf("a search predicted to spend %d credit(s) spent %d (%d → %d); another process using the key would do this too", predicted, spent, before, after))
 		}
 	}
 	if serr != nil {
+		serr = searchError(serr, aerr == nil)
 		if credits.Spent != nil && *credits.Spent > 0 {
-			return nil, fmt.Errorf("%w (and %d credit(s) were spent)", serr, *credits.Spent)
+			return nil, fmt.Errorf("%w (and %d credit(s) were spent — retrying would spend again)", serr, *credits.Spent)
 		}
 		return nil, serr
 	}
 	s, err := projectSearch(en, false, q)
 	if err != nil {
+		if credits.Spent != nil && *credits.Spent > 0 {
+			return nil, fmt.Errorf("%w (and %d credit(s) were spent)", err, *credits.Spent)
+		}
 		return nil, err
 	}
 	s.Credits = credits
@@ -254,6 +263,16 @@ func (e *Engine) SearchServices(ctx context.Context, q SearchQuery, refresh bool
 	}
 	e.mu.Unlock()
 	return s, nil
+}
+
+// searchError reads a failed search. A 401 there, when /api-info answered
+// with the same key before and after, is not the key: it is the plan or the
+// remaining credits refusing the search.
+func searchError(err error, keyWorked bool) error {
+	if keyWorked && shodan.Code(err) == shodan.CodeAuthFailed {
+		return &Error{Code: CodePlanRestricted, Message: "Shodan refused the search (401) although the key works for /api-info — the plan or the remaining query credits do not allow it; check get_quota"}
+	}
+	return err
 }
 
 func (e *Engine) halt(why string) {
@@ -273,31 +292,35 @@ func (e *Engine) remaining(ctx context.Context) (int, error) {
 	return q.QueryCredits, nil
 }
 
-// validSearch accepts a body with a total and a list of matches.
+// validSearch accepts a body with a total and a list of matches that decode
+// as the projection reads them. Anything looser would let a page that cannot
+// be projected be cached for a day after it was paid for.
 func validSearch(body []byte) error {
-	var w struct {
-		Total   *int              `json:"total"`
-		Matches []json.RawMessage `json:"matches"`
+	var w searchWire
+	if err := json.Unmarshal(body, &w); err != nil {
+		return &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's search answer is not the shape this tool reads: " + err.Error()}
 	}
-	if json.Unmarshal(body, &w) != nil || w.Total == nil || w.Matches == nil {
+	if w.Total == nil || w.Matches == nil {
 		return &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's search answer has no total or no matches"}
 	}
 	return nil
 }
 
+type searchWire struct {
+	Total   *int        `json:"total"`
+	Matches []wireMatch `json:"matches"`
+	Facets  map[string][]struct {
+		Count int             `json:"count"`
+		Value json.RawMessage `json:"value"`
+	} `json:"facets"`
+}
+
 func projectSearch(en *entry, cached bool, q SearchQuery) (*Search, error) {
-	var w struct {
-		Total   int         `json:"total"`
-		Matches []wireMatch `json:"matches"`
-		Facets  map[string][]struct {
-			Count int             `json:"count"`
-			Value json.RawMessage `json:"value"`
-		} `json:"facets"`
+	var w searchWire
+	if err := json.Unmarshal(en.Body, &w); err != nil || w.Total == nil {
+		return nil, &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's search answer is not the shape this tool reads"}
 	}
-	if err := json.Unmarshal(en.Body, &w); err != nil {
-		return nil, &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's search answer is not the shape this tool reads: " + err.Error()}
-	}
-	s := &Search{Query: q.Query, Page: q.Page, Unit: "services", Total: w.Total, Rows: []Row{}, Provenance: provenance(en, cached), body: en.Body}
+	s := &Search{Query: q.Query, Page: q.Page, Unit: "services", Total: *w.Total, Rows: []Row{}, Provenance: provenance(en, cached), body: en.Body}
 	s.Provenance.DocID = docID(en.Body)
 	for _, m := range w.Matches {
 		r := Row{IP: m.IPStr, Port: m.Port, Transport: m.Transport, Module: m.Shodan.Module, Org: str(m.Org),

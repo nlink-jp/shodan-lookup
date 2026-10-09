@@ -201,3 +201,47 @@ func TestParseQueryPredicts(t *testing.T) {
 		t.Error("parse_query spent")
 	}
 }
+
+// From the pre-release verification (M2, L1).
+
+// A failed search that was not charged is not a mismatch: the process keeps
+// searching, and the advice to retry a 429 holds.
+func TestAFreeFailureDoesNotStopSearching(t *testing.T) {
+	up := creditFake(50, 0)
+	up.searchErr = &shodan.Error{Code: shodan.CodeRateLimited, Status: 429, Message: "429"}
+	e := searchEngine(t, up, 0)
+	_, err := e.SearchServices(context.Background(), SearchQuery{Query: "port:443"}, false)
+	wantCode(t, err, shodan.CodeRateLimited)
+	up.searchErr, up.charge = nil, 1
+	if _, err := e.SearchServices(context.Background(), SearchQuery{Query: "port:443"}, false); err != nil {
+		t.Errorf("searching stopped after a free failure: %v", err)
+	}
+}
+
+// A 401 on the search, with /api-info answering before and after, is the plan
+// or the credits — not the key.
+func TestASearch401WithAWorkingKeyIsNotTheKey(t *testing.T) {
+	up := creditFake(50, 0)
+	up.searchErr = &shodan.Error{Code: shodan.CodeAuthFailed, Status: 401, Message: "401"}
+	_, err := searchEngine(t, up, 0).SearchServices(context.Background(), SearchQuery{Query: "port:443"}, false)
+	wantCode(t, err, CodePlanRestricted)
+	if strings.Contains(err.Error(), "check [api] key") {
+		t.Errorf("the key is blamed: %v", err)
+	}
+}
+
+// A page that cannot be projected is not cached after it was paid for, and the
+// error says what was spent.
+func TestAnUnprojectablePageIsNotCachedAndSaysWhatItCost(t *testing.T) {
+	up := creditFake(50, 1)
+	up.searchBody = `{"total": 1, "matches": [{"ip_str": "1.2.3.4", "port": "443"}]}`
+	e := searchEngine(t, up, 0)
+	_, err := e.SearchServices(context.Background(), SearchQuery{Query: "port:443"}, false)
+	if Code(err) != shodan.CodeDecode || !strings.Contains(err.Error(), "1 credit(s) were spent") {
+		t.Errorf("err: %v", err)
+	}
+	_, _ = e.SearchServices(context.Background(), SearchQuery{Query: "port:443"}, false)
+	if up.count("search") != 2 {
+		t.Errorf("an unprojectable page was cached (searches %d)", up.count("search"))
+	}
+}
