@@ -146,10 +146,10 @@ the Phase 1 measurements"; the essentials:
   unknown, or equal with its transport unknown); "more than one service;
   pass transport" when a port asked without a transport also holds a service
   whose transport could not be read; `not_observed` as usual when every
-  left-out service's known port or transport rules it out. **Residual:** a
-  left-out service whose port is unknown may be on the port asked; a query
-  without a transport then answers the one readable service there (with the
-  note) rather than calling it ambiguous — treating it as ambiguous would
+  left-out service's known port or transport rules it out. A left-out
+  service whose port is unknown does not make a port ambiguous: a query
+  without a transport answers the one readable service there, and the note
+  says a service was left out. By design — counting it as ambiguous would
   refuse every transport-less query on that host. A `verified` that cannot be read reads false,
   which the tool already defines as "not confirmed". Keys resolve in document
   order as in encoding/json (a later duplicate wins). The string fields go
