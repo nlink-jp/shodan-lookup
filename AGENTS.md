@@ -143,10 +143,14 @@ the Phase 1 measurements"; the essentials:
   a port with what of each left-out service could be read (`unidentified`
   in service.go, read through decodeLoose too): `decode_error`, not
   `not_observed`, when a left-out service may be the one asked for (its port
-  unknown, or equal with its transport unknown or equal); "more than one
-  service; pass transport" when a port asked without a transport also holds
-  a service whose transport could not be read; `not_observed` as usual when
-  every left-out service's known port or transport rules it out. A `verified` that cannot be read reads false,
+  unknown, or equal with its transport unknown); "more than one service;
+  pass transport" when a port asked without a transport also holds a service
+  whose transport could not be read; `not_observed` as usual when every
+  left-out service's known port or transport rules it out. **Residual:** a
+  left-out service whose port is unknown may be on the port asked; a query
+  without a transport then answers the one readable service there (with the
+  note) rather than calling it ambiguous — treating it as ambiguous would
+  refuse every transport-less query on that host. A `verified` that cannot be read reads false,
   which the tool already defines as "not confirmed". Keys resolve in document
   order as in encoding/json (a later duplicate wins). The string fields go
   through `text` so a number is kept rather than left out.
