@@ -102,21 +102,40 @@ func (e *Engine) GetService(ctx context.Context, q ServiceQuery, refresh bool) (
 			match = append(match, s)
 		}
 	}
+	// Services left out because their port or transport could not be read
+	// are compared by what of them could be: one that may be the service
+	// asked for keeps "not observed" from being manufactured, and one on
+	// this port makes a port asked without a transport ambiguous.
+	var maybe, onPort int
+	if hb.skip.dropped("data[]") > 0 {
+		for _, u := range unidentified(hb.entry.Body) {
+			if (u.Port == nil || *u.Port == q.Port) && (q.Transport == "" || u.Transport == nil || *u.Transport == q.Transport) {
+				maybe++
+			}
+			if u.Port != nil && *u.Port == q.Port {
+				onPort++
+			}
+		}
+	}
 	switch {
-	case len(match) == 0 && hb.skip.dropped("data[]") > 0:
-		// A service was left out because its port or transport could not be
-		// read: it may be this one, so "not observed" would be manufactured.
+	case len(match) == 0 && onPort > 0:
 		return nil, &shodan.Error{Code: shodan.CodeDecode, Message: fmt.Sprintf(
-			"no readable service on %s port %d%s, but Shodan's record holds a service this tool could not identify (its port or transport, or the service itself, was missing or unreadable) — it may be this one; the CLI's host --raw has it. Not evidence that the port is closed", hb.ip, q.Port, transportSuffix(q.Transport))}
+			"%s port %d%s: Shodan's record holds a service on port %d whose transport this tool could not read — it may be this one; the CLI's host --raw has it. Not evidence that the port is closed", hb.ip, q.Port, transportSuffix(q.Transport), q.Port)}
+	case len(match) == 0 && maybe > 0:
+		return nil, &shodan.Error{Code: shodan.CodeDecode, Message: fmt.Sprintf(
+			"no readable service on %s port %d%s, but Shodan's record holds a service whose port this tool could not read (or that was not readable at all) — it may be this one; the CLI's host --raw has it. Not evidence that the port is closed", hb.ip, q.Port, transportSuffix(q.Transport))}
 	case len(match) == 0:
 		return nil, &Error{Code: CodeNotObserved, Message: fmt.Sprintf(
 			"Shodan has no banner for %s port %d%s (observed ports: %v) — not evidence that the port is closed", hb.ip, q.Port, transportSuffix(q.Transport), sortedPorts(hb.wire))}
-	case len(match) > 1:
+	case len(match) > 1 || q.Transport == "" && onPort > 0:
 		var ts []string
 		for _, s := range match {
 			ts = append(ts, s.Transport)
 		}
 		sort.Strings(ts)
+		for range onPort {
+			ts = append(ts, "one whose transport could not be read")
+		}
 		return nil, invalid(fmt.Sprintf("%s port %d has more than one service (%s); pass transport", hb.ip, q.Port, strings.Join(ts, ", ")))
 	}
 	s := match[0]
@@ -245,6 +264,33 @@ func certText(s *wireSSL) string {
 		return string(s.Cert)
 	}
 	return b.String()
+}
+
+// partialID is what could be read of a service's identity.
+type partialID struct {
+	Port      *int    `json:"port"`
+	Transport *string `json:"transport"`
+}
+
+// unidentified returns, for each service in a host record that the
+// projection left out, what of its port and transport could be read — read
+// as the projection reads them (decodeLoose: the last occurrence decides).
+func unidentified(body []byte) []partialID {
+	var w struct {
+		Data []json.RawMessage `json:"data"`
+	}
+	if json.Unmarshal(body, &w) != nil {
+		return nil
+	}
+	var out []partialID
+	for _, raw := range w.Data {
+		var id partialID
+		_, _ = decodeLoose(raw, &id) // not an object: nothing of it is known
+		if id.Port == nil || id.Transport == nil {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 func sortedPorts(w *wireHost) []int {

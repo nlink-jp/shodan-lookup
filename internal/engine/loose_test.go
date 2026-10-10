@@ -418,3 +418,60 @@ func TestACappedHistoryWithALeftOutBannerIsStillCapped(t *testing.T) {
 		t.Errorf("notes: %s", notes)
 	}
 }
+
+// A service left out because only its transport could not be read still has
+// a known port: other ports are answered as usual, its own port is not
+// called unobserved, and a readable service sharing it is not answered as
+// if it were the only one.
+func TestAServiceWithAnUnreadableTransportIsComparedByItsPort(t *testing.T) {
+	up := newFake()
+	up.hosts["1.2.3.4"] = `{"ip_str": "1.2.3.4", "ports": [22, 443, 8080], "data": [
+	  {"port": 22, "transport": "tcp", "data": "SSH-2.0-x"},
+	  {"port": 443, "transport": "tcp", "data": "HTTP/1.1 200 OK"},
+	  {"port": 443, "transport": null, "data": "QUIC"},
+	  {"port": 8080, "transport": 5, "data": "HTTP/1.1 404"}]}`
+	e := testEngine(t, up)
+	ask := func(port int, transport string) (*Page, error) {
+		return e.GetService(context.Background(), ServiceQuery{IP: "1.2.3.4", Port: port, Transport: transport, Section: SectionBanner}, false)
+	}
+	if p, err := ask(22, ""); err != nil || p.Port != 22 {
+		t.Errorf("22: %v", err)
+	}
+	// No left-out service can be on 9999: its port, 8080 or 443, was read.
+	_, err := ask(9999, "")
+	wantCode(t, err, CodeNotObserved)
+	for _, c := range []struct {
+		port      int
+		transport string
+	}{{8080, ""}, {8080, "tcp"}, {8080, "udp"}} {
+		_, err := ask(c.port, c.transport)
+		if Code(err) != shodan.CodeDecode || !strings.Contains(err.Error(), "whose transport this tool could not read") {
+			t.Errorf("%d/%s: %v", c.port, c.transport, err)
+		}
+	}
+	_, err = ask(443, "")
+	if Code(err) != CodeInvalidArgument || !strings.Contains(err.Error(), "tcp, one whose transport could not be read") {
+		t.Errorf("443 without a transport: %v", err)
+	}
+	if p, err := ask(443, "tcp"); err != nil || p.Text != "HTTP/1.1 200 OK" {
+		t.Errorf("443/tcp: %v %+v", err, p)
+	}
+}
+
+// A service whose port could not be read may be on any port: no port without
+// a readable service is called unobserved.
+func TestAServiceWithAnUnreadablePortMayBeOnAnyPort(t *testing.T) {
+	up := newFake()
+	up.hosts["1.2.3.4"] = `{"ip_str": "1.2.3.4", "data": [
+	  {"port": 22, "transport": "tcp", "data": "SSH-2.0-x"}, {"port": "x", "transport": "udp", "data": "?"}]}`
+	e := testEngine(t, up)
+	for _, tr := range []string{"", "udp"} {
+		_, err := e.GetService(context.Background(), ServiceQuery{IP: "1.2.3.4", Port: 9999, Transport: tr, Section: SectionBanner}, false)
+		if Code(err) != shodan.CodeDecode || !strings.Contains(err.Error(), "whose port this tool could not read") {
+			t.Errorf("9999/%s: %v", tr, err)
+		}
+	}
+	// Its transport was read: it cannot be a TCP service.
+	_, err := e.GetService(context.Background(), ServiceQuery{IP: "1.2.3.4", Port: 9999, Transport: "tcp", Section: SectionBanner}, false)
+	wantCode(t, err, CodeNotObserved)
+}

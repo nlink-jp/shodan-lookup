@@ -139,18 +139,17 @@ the Phase 1 measurements"; the essentials:
   banners in `window.banners` and the cap, since the cap is Shodan's; a
   map entry keeps its key (a CVE ID) and only its value's unreadable parts
   are absent. `notes` name each path with a count
-  (`data[].http.status (1)`), never a value or a key. `get_service` answers
-  `decode_error`, not `not_observed`, when a service was left out whole — it
-  may be the one asked for. A `verified` that cannot be read reads false,
+  (`data[].http.status (1)`), never a value or a key. `get_service` compares
+  a port with what of each left-out service could be read (`unidentified`
+  in service.go, read through decodeLoose too): `decode_error`, not
+  `not_observed`, when a left-out service may be the one asked for (its port
+  unknown, or equal with its transport unknown or equal); "more than one
+  service; pass transport" when a port asked without a transport also holds
+  a service whose transport could not be read; `not_observed` as usual when
+  every left-out service's known port or transport rules it out. A `verified` that cannot be read reads false,
   which the tool already defines as "not confirmed". Keys resolve in document
   order as in encoding/json (a later duplicate wins). The string fields go
   through `text` so a number is kept rather than left out.
-  **Residual:** once any service was left out, `get_service` answers
-  `decode_error` for every port with no readable service — also ports that
-  service cannot be (when only its transport was unreadable) — and a port
-  asked without a transport answers the one readable service rather than
-  "more than one service". Both err toward not claiming; the note names the
-  left-out entry.
 - **Timestamps are UTC** (newest observation 2–30 min before `Date`, 3/3) and
   carry no suffix (`2026-10-09T05:01:41.136770`).
 - **IPv6 works**, abbreviated or not, in host lookups and in `ip:` counts

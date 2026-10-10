@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- `get_service` compares a port with what could be read of each service it
+  left out. Once any service was left out it answered `decode_error` for
+  every port without a readable service; now a service whose port was read
+  rules itself out of other ports (`not_observed` is answered as usual), a
+  service whose transport was read rules itself out of the other transport,
+  and a port asked without a transport that also holds a service whose
+  transport could not be read is ambiguous ("pass transport") instead of
+  answering the one readable service as if it were the only one.
+
 ## [0.1.2] — 2026-10-10
 
 ### Fixed
