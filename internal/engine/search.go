@@ -136,10 +136,10 @@ type Credits struct {
 type wireMatch struct {
 	wireService
 	IPStr     string   `json:"ip_str"`
-	Org       *string  `json:"org"`
+	Org       *text    `json:"org"`
 	Hostnames []string `json:"hostnames"`
 	Location  struct {
-		CountryCode *string `json:"country_code"`
+		CountryCode *text `json:"country_code"`
 	} `json:"location"`
 }
 

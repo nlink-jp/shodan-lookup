@@ -123,6 +123,12 @@ the Phase 1 measurements"; the essentials:
 - **Counts are services, not hosts**: an `ip` facet value equals the number of
   matching services on that IP. `ip:1000` returned 1,000 entries (39 KB);
   `org:1000` all 663.
+- **Scalars are not held to one type** (2026-10-10): one host record carried
+  `asn` as `2497` at the top and as both `2497` and `"AS2497"` across its
+  services. Strictly typed, that one field failed the whole record (`--raw`
+  too). The string fields read go through `text` (wire.go): string or number,
+  anything else is still `decode_error` — without the field's name, which
+  encoding/json does not add for a custom unmarshaler.
 - **Timestamps are UTC** (newest observation 2–30 min before `Date`, 3/3) and
   carry no suffix (`2026-10-09T05:01:41.136770`).
 - **IPv6 works**, abbreviated or not, in host lookups and in `ip:` counts

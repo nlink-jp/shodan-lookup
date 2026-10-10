@@ -1,7 +1,9 @@
 package engine
 
 import (
+	"cmp"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -12,14 +14,14 @@ import (
 
 type wireHost struct {
 	IPStr       string        `json:"ip_str"`
-	Org         *string       `json:"org"`
-	ISP         *string       `json:"isp"`
-	ASN         *string       `json:"asn"`
-	CountryCode *string       `json:"country_code"`
-	City        *string       `json:"city"`
+	Org         *text         `json:"org"`
+	ISP         *text         `json:"isp"`
+	ASN         *text         `json:"asn"`
+	CountryCode *text         `json:"country_code"`
+	City        *text         `json:"city"`
 	Hostnames   []string      `json:"hostnames"`
 	Domains     []string      `json:"domains"`
-	OS          *string       `json:"os"`
+	OS          *text         `json:"os"`
 	Tags        []string      `json:"tags"`
 	LastUpdate  string        `json:"last_update"`
 	Ports       []int         `json:"ports"`
@@ -31,8 +33,8 @@ type wireService struct {
 	Port      int                     `json:"port"`
 	Transport string                  `json:"transport"`
 	Timestamp string                  `json:"timestamp"`
-	Product   *string                 `json:"product"`
-	Version   *string                 `json:"version"`
+	Product   *text                   `json:"product"`
+	Version   *text                   `json:"version"`
 	CPE23     []string                `json:"cpe23"`
 	Data      string                  `json:"data"`
 	Tags      []string                `json:"tags"`
@@ -44,10 +46,10 @@ type wireService struct {
 
 type wireHTTP struct {
 	Status   *int                       `json:"status"`
-	Title    *string                    `json:"title"`
-	Server   *string                    `json:"server"`
-	Location *string                    `json:"location"`
-	HTML     *string                    `json:"html"`
+	Title    *text                      `json:"title"`
+	Server   *text                      `json:"server"`
+	Location *text                      `json:"location"`
+	HTML     *text                      `json:"html"`
 	Headers  map[string]json.RawMessage `json:"headers"`
 	Favicon  *struct {
 		Hash *int64 `json:"hash"`
@@ -132,9 +134,42 @@ func headerValue(raw json.RawMessage) string {
 	return string(raw)
 }
 
-func str(p *string) string {
+// text is a scalar Shodan sends as a string without holding it to one type:
+// asn arrives as "AS2497" and as 2497 within one host record (measured,
+// 2026-10-10). Strictly typed, one such field failed the whole record, --raw
+// included. A number is read as its JSON text; anything else is still a shape
+// error — one that encoding/json does not name the field of, so the message
+// says which kind arrived instead. The value itself stays out: title, server
+// and html are written by the investigated host.
+type text string
+
+func (t *text) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		*t = text(s)
+		return nil
+	}
+	var n json.Number
+	if err := json.Unmarshal(b, &n); err != nil {
+		kind := map[byte]string{'{': "object", '[': "array", 't': "bool", 'f': "bool"}[b[0]]
+		return fmt.Errorf("a string field (org, asn, product, title, …) holds a JSON %s", cmp.Or(kind, "value"))
+	}
+	*t = text(n)
+	return nil
+}
+
+func str(p *text) string {
 	if p == nil {
 		return ""
 	}
-	return *p
+	return string(*p)
+}
+
+// asName writes an AS number as Shodan's string form does, AS2497, whichever
+// of the two forms the record used.
+func asName(s string) string {
+	if s == "" || strings.Trim(s, "0123456789") != "" {
+		return s
+	}
+	return "AS" + s
 }

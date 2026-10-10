@@ -218,7 +218,7 @@ func (e *Engine) Raw(ctx context.Context, ip string, refresh bool) (json.RawMess
 func (e *Engine) project(hb *hostBody) *Host {
 	w, now := hb.wire, e.now().UTC()
 	h := &Host{
-		IP: w.IPStr, Org: str(w.Org), ISP: str(w.ISP), ASN: str(w.ASN), CountryCode: str(w.CountryCode),
+		IP: w.IPStr, Org: str(w.Org), ISP: str(w.ISP), ASN: asName(str(w.ASN)), CountryCode: str(w.CountryCode),
 		City: str(w.City), Hostnames: w.Hostnames, Domains: w.Domains, OS: str(w.OS), Tags: w.Tags,
 		Ports: append([]int{}, w.Ports...), Services: []Service{}, Vulns: []Vuln{},
 	}

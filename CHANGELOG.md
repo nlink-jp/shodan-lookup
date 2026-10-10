@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- A host record whose `asn` arrived as a number (`2497`) failed as a whole
+  with `decode_error` — `--raw` included. Shodan does not hold its scalars to
+  one type: the same record carried `2497` and `"AS2497"` (measured). The
+  string fields the tool reads (org, isp, asn, country, city, os, product,
+  version, HTTP title/server/location/html) now accept a string or a number,
+  and the AS number is always written `AS2497`.
+
 ## [0.1.0] — 2026-10-09
 
 First release: a read-only CLI and local MCP server answering what an IP

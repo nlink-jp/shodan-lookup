@@ -663,3 +663,56 @@ func TestDerivedRestrictedNamesAreRefused(t *testing.T) {
 	_, err = e.CountServices(context.Background(), "port:22", []FacetSpec{{Name: "vuln.verified", N: 3}}, false)
 	wantCode(t, err, CodePlanRestricted)
 }
+
+// Shodan does not hold its scalars to one type: asn arrives as a number and as
+// "AS…" within one record (measured). Either form reads, and the AS number is
+// written one way.
+func TestAScalarSentAsANumberReads(t *testing.T) {
+	up := newFake()
+	body := strings.Replace(hostFixture, `"asn": "AS64500"`, `"asn": 64500`, 1)
+	body = strings.Replace(body, `"version": "1.0"`, `"version": 2, "asn": "AS64500"`, 1)
+	body = strings.Replace(body, `"product": "ExampleSSH"`, `"product": "ExampleSSH", "asn": 64500`, 1)
+	up.hosts["1.2.3.4"] = body
+	h, err := testEngine(t, up).LookupHost(context.Background(), "1.2.3.4", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.ASN != "AS64500" {
+		t.Errorf("asn = %q, want AS64500", h.ASN)
+	}
+	if v := h.Services[3].Version; v != "2" {
+		t.Errorf("a numeric version = %q, want \"2\"", v)
+	}
+}
+
+// What is neither a string nor a number is still a shape error, and says what
+// arrived.
+func TestAScalarOfAnotherTypeIsADecodeError(t *testing.T) {
+	up := newFake()
+	up.hosts["1.2.3.4"] = strings.Replace(hostFixture, `"asn": "AS64500"`, `"asn": {"n": 64500}`, 1)
+	_, err := testEngine(t, up).LookupHost(context.Background(), "1.2.3.4", false)
+	wantCode(t, err, shodan.CodeDecode)
+	if !strings.Contains(err.Error(), "string field (org, asn") || !strings.Contains(err.Error(), "JSON object") {
+		t.Errorf("the message does not say what arrived: %v", err)
+	}
+}
+
+func TestText(t *testing.T) {
+	for in, want := range map[string]string{`"AS1"`: "AS1", `2497`: "2497", `1.5`: "1.5", `null`: "", `""`: ""} {
+		var v text
+		if err := json.Unmarshal([]byte(in), &v); err != nil || string(v) != want {
+			t.Errorf("%s -> %q, %v; want %q", in, v, err, want)
+		}
+	}
+	for _, in := range []string{`true`, `[]`, `{}`} {
+		var v text
+		if json.Unmarshal([]byte(in), &v) == nil {
+			t.Errorf("%s was accepted", in)
+		}
+	}
+	for in, want := range map[string]string{"2497": "AS2497", "AS2497": "AS2497", "": "", "1.5": "1.5"} {
+		if got := asName(in); got != want {
+			t.Errorf("asName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
