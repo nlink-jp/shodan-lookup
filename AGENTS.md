@@ -136,8 +136,9 @@ the Phase 1 measurements"; the essentials:
   transport, a match's `ip_str`, a facet value's count) is missing, null or
   unreadable in its last occurrence — or that is null or not an object — is
   left out whole (a required field must be a leaf); history counts those
-  banners in `window.banners` and the cap, since the cap is Shodan's; a map entry keeps its key (a CVE ID) and only its value's
-  unreadable parts are absent. `notes` name each path with a count
+  banners in `window.banners` and the cap, since the cap is Shodan's; a
+  map entry keeps its key (a CVE ID) and only its value's unreadable parts
+  are absent. `notes` name each path with a count
   (`data[].http.status (1)`), never a value or a key. `get_service` answers
   `decode_error`, not `not_observed`, when a service was left out whole — it
   may be the one asked for. A `verified` that cannot be read reads false,

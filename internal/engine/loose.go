@@ -67,7 +67,7 @@ func (sk skipped) note(raw string) string {
 		parts = append(parts, "left out: "+countList(sk.values))
 	}
 	if len(sk.entries) > 0 {
-		parts = append(parts, "entries left out whole, because the field that identifies them (or the entry itself) is missing or could not be read: "+countList(sk.entries))
+		parts = append(parts, "entries left out whole, counted by the reason — the field that identifies them, or the entry itself, missing or unreadable (one entry can count under two fields): "+countList(sk.entries))
 	}
 	return fmt.Sprintf("Shodan's document held values of a type this tool does not read — %s. Read each as unknown, not as zero, false or empty; %s holds them as Shodan sent them",
 		strings.Join(parts, "; "), raw)

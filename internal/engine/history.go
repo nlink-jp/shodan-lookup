@@ -152,7 +152,7 @@ func (e *Engine) GetHistory(ctx context.Context, q HistoryQuery, refresh bool) (
 		h.Notes = append(h.Notes, fmt.Sprintf("%d banner(s) had no readable timestamp and are left out of the timeline", n))
 	}
 	if n := w.skip.dropped("data[]"); n > 0 {
-		h.Notes = append(h.Notes, fmt.Sprintf("%d banner(s) had no readable port or transport and are left out of the timeline; the window's oldest sighting and a port's first_seen are read from the rest, so either may be later than Shodan's own", n))
+		h.Notes = append(h.Notes, fmt.Sprintf("%d banner(s) could not be identified (a port or transport, or the banner itself, was missing or unreadable) and are left out of the timeline; the window's oldest sighting and a port's first_seen are read from the rest, so either may be later than Shodan's own", n))
 	}
 	if len(banners) > 0 {
 		h.Window.Newest = banners[0].ts.Format(time.RFC3339)
@@ -187,9 +187,9 @@ func (e *Engine) GetHistory(ctx context.Context, q HistoryQuery, refresh bool) (
 	}
 	if d := h.Window.Dominant; d != nil {
 		if h.Window.Capped {
-			h.Notes = append(h.Notes, fmt.Sprintf("%d/%s holds %d of the %d banners; the window is short because of it", d.Port, d.Transport, d.Banners, len(banners)))
+			h.Notes = append(h.Notes, fmt.Sprintf("%d/%s holds %d of the %d banners placed in the timeline; the window is short because of it", d.Port, d.Transport, d.Banners, len(banners)))
 		} else {
-			h.Notes = append(h.Notes, fmt.Sprintf("%d/%s holds %d of the %d banners", d.Port, d.Transport, d.Banners, len(banners)))
+			h.Notes = append(h.Notes, fmt.Sprintf("%d/%s holds %d of the %d banners placed in the timeline", d.Port, d.Transport, d.Banners, len(banners)))
 		}
 	}
 	if n := w.skip.note("the CLI's history --raw"); n != "" {

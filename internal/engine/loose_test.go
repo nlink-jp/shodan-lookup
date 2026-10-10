@@ -267,7 +267,7 @@ func TestAHistoryWithADriftedBannerKeepsTheRest(t *testing.T) {
 	}
 	notes := strings.Join(h.Notes, " ")
 	if !strings.Contains(notes, "data[].port (1)") || !strings.Contains(notes, "data[].http.title (1)") || !strings.Contains(notes, "history --raw") ||
-		!strings.Contains(notes, "1 banner(s) had no readable port or transport") || !strings.Contains(notes, "Shodan returned 14 banners") {
+		!strings.Contains(notes, "1 banner(s) could not be identified") || !strings.Contains(notes, "Shodan returned 14 banners") {
 		t.Errorf("notes: %s", notes)
 	}
 	if raw, err := e.RawHistory(context.Background(), "1.2.3.4", false); err != nil || string(raw) != body {
