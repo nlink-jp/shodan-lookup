@@ -245,3 +245,17 @@ func TestAnUnprojectablePageIsNotCachedAndSaysWhatItCost(t *testing.T) {
 		t.Errorf("an unprojectable page was cached (searches %d)", up.count("search"))
 	}
 }
+
+// A paid-for page whose scalars arrive as numbers reads like any other.
+func TestASearchMatchWithNumericScalarsReads(t *testing.T) {
+	up := creditFake(50, 1)
+	up.searchBody = `{"total": 1, "matches": [{"ip_str": "1.2.3.4", "port": 443, "transport": "tcp",
+	  "org": 64500, "location": {"country_code": 392}, "product": "ExampleServer", "version": 2}]}`
+	s, err := searchEngine(t, up, 0).SearchServices(context.Background(), SearchQuery{Query: "port:443"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := s.Rows[0]; r.Org != "64500" || r.CountryCode != "392" || r.Version != "2" {
+		t.Errorf("row: %+v", r)
+	}
+}
