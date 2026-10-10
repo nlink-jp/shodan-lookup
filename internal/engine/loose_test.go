@@ -81,7 +81,7 @@ func TestDecodeLooseReadsWhatItCanAndCountsTheRest(t *testing.T) {
 			t.Errorf("values[%q] = %d, want %d (all: %v)", p, sk.values[p], n, sk.values)
 		}
 	}
-	if !sk.dropped("items[]") || sk.dropped("ports[]") {
+	if sk.dropped("items[]") != 1 || sk.dropped("ports[]") != 0 {
 		t.Errorf("dropped: %v", sk.entries)
 	}
 	note := sk.note("the CLI's host --raw")
@@ -131,7 +131,7 @@ func TestDecodeLooseMatchesStrictDecoding(t *testing.T) {
 }
 
 func TestDecodeLooseRefusesOnlyANonObject(t *testing.T) {
-	for _, in := range []string{`[]`, `"x"`, `null`, `1`, `{`, ``, `{} {}`, `{"a": }`} {
+	for _, in := range []string{`[]`, `"x"`, `null`, `1`, `{`, ``, `{} {}`, `{"a": }`, `{"a":1}x`, `{"a":1} 2`} {
 		var w wireHost
 		if _, err := decodeLoose([]byte(in), &w); err == nil {
 			t.Errorf("%q was accepted", in)
@@ -256,7 +256,8 @@ func TestAHistoryWithADriftedBannerKeepsTheRest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h.Window.Banners != 13 {
+	// The window counts what Shodan returned, the banner left out included.
+	if h.Window.Banners != 14 {
 		t.Errorf("banners: %d", h.Window.Banners)
 	}
 	for _, p := range h.Ports {
@@ -265,7 +266,8 @@ func TestAHistoryWithADriftedBannerKeepsTheRest(t *testing.T) {
 		}
 	}
 	notes := strings.Join(h.Notes, " ")
-	if !strings.Contains(notes, "data[].port (1)") || !strings.Contains(notes, "data[].http.title (1)") || !strings.Contains(notes, "history --raw") {
+	if !strings.Contains(notes, "data[].port (1)") || !strings.Contains(notes, "data[].http.title (1)") || !strings.Contains(notes, "history --raw") ||
+		!strings.Contains(notes, "1 banner(s) had no readable port or transport") || !strings.Contains(notes, "Shodan returned 14 banners") {
 		t.Errorf("notes: %s", notes)
 	}
 	if raw, err := e.RawHistory(context.Background(), "1.2.3.4", false); err != nil || string(raw) != body {
@@ -332,4 +334,87 @@ func TestACountWithADriftedFacetIsAnswered(t *testing.T) {
 	up.countRaw["port:23|"] = `{"total": "120"}`
 	_, err := e.CountServices(context.Background(), "port:23", nil, false)
 	wantCode(t, err, shodan.CodeDecode)
+}
+
+// A required field that is missing or null is as unknown as one of the wrong
+// type, and an entry that is null or not an object is no entry: each is left
+// out whole, never kept with a zero.
+func TestAnEntryWithoutItsIdentityIsLeftOut(t *testing.T) {
+	var d looseDoc
+	sk, err := decodeLoose([]byte(`{"items": [{"id": null, "name": "a"}, {"name": "b"}, null, "x", {"id": 4}]}`), &d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Items) != 1 || d.Items[0].ID != 4 {
+		t.Errorf("items: %+v", d.Items)
+	}
+	if sk.dropped("items[]") != 4 || sk.entries["items[].id"] != 2 || sk.entries["items[]"] != 2 || len(sk.values) != 0 {
+		t.Errorf("skipped: %+v", sk)
+	}
+}
+
+// As in encoding/json, the last occurrence of a key decides: an unreadable
+// earlier duplicate does not cost the entry, an unreadable later one does.
+func TestTheLastOccurrenceOfARequiredFieldDecides(t *testing.T) {
+	var d looseDoc
+	sk, err := decodeLoose([]byte(`{"items": [{"id": "x", "id": 1}, {"id": 2, "ID": "y"}]}`), &d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Items) != 1 || d.Items[0].ID != 1 || sk.entries["items[].id"] != 1 || len(sk.values) != 0 {
+		t.Errorf("items %+v skipped %+v", d.Items, sk)
+	}
+}
+
+func TestHostServicesWithoutAPortAreLeftOut(t *testing.T) {
+	up := newFake()
+	up.hosts["1.2.3.4"] = `{"ip_str": "1.2.3.4", "ports": [22, 443], "data": [null,
+	  {"port": null, "transport": "tcp", "data": "a"}, {"transport": "tcp", "data": "b"},
+	  {"port": 22, "transport": "tcp", "data": "SSH-2.0-x"}]}`
+	e := testEngine(t, up)
+	h, err := e.LookupHost(context.Background(), "1.2.3.4", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.ServiceCount != 1 || h.Services[0].Port != 22 {
+		t.Errorf("services: %+v", h.Services)
+	}
+	notes := strings.Join(h.Notes, " ")
+	if !strings.Contains(notes, "data[] (1)") || !strings.Contains(notes, "data[].port (2)") {
+		t.Errorf("notes: %s", notes)
+	}
+	_, err = e.GetService(context.Background(), ServiceQuery{IP: "1.2.3.4", Port: 443, Section: SectionBanner}, false)
+	if Code(err) == CodeNotObserved {
+		t.Errorf("443 manufactured as not observed: %v", err)
+	}
+}
+
+func TestAFacetValueWithoutACountIsLeftOut(t *testing.T) {
+	up := newFake()
+	up.countRaw["port:22|port:5"] = `{"total": 10, "facets": {"port": [{"count": null, "value": 1}, {"value": 2}, null, {"count": 4, "value": 22}]}}`
+	c, err := testEngine(t, up).CountServices(context.Background(), "port:22", []FacetSpec{{Name: "port", N: 5}}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := c.Facets[0].Values; len(v) != 1 || v[0].Count != 4 || v[0].Value != "22" {
+		t.Errorf("values: %+v", v)
+	}
+}
+
+// A capped history stays capped when a banner in it cannot be read: the cap
+// is on what Shodan returned.
+func TestACappedHistoryWithALeftOutBannerIsStillCapped(t *testing.T) {
+	up := newFake()
+	up.histories["1.2.3.4"] = strings.Replace(historyBody(HistoryCap-4), `"port":53,`, `"port":"53",`, 1)
+	h, err := testEngine(t, up).GetHistory(context.Background(), HistoryQuery{IP: "1.2.3.4"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Window.Banners != HistoryCap || !h.Window.Capped {
+		t.Errorf("window: %+v", h.Window)
+	}
+	notes := strings.Join(h.Notes, " ")
+	if !strings.Contains(notes, "nothing earlier can be read") || strings.Contains(notes, "under its") {
+		t.Errorf("notes: %s", notes)
+	}
 }

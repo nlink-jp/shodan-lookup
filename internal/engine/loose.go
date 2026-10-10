@@ -3,7 +3,9 @@ package engine
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"sort"
 	"strings"
@@ -21,8 +23,9 @@ import (
 //   - a field it cannot read stays absent — the wire types make such fields
 //     pointers, or a string whose empty value the projection does not show;
 //   - a list element whose identifying field (tagged loose:"required": a
-//     service's port, a facet value's count) cannot be read is left out
-//     whole, never kept with a zero in that field;
+//     service's port, a facet value's count) is missing, null or cannot be
+//     read is left out whole, never kept with a zero in that field — and so
+//     is a list element that is null or not an object at all;
 //   - a map entry is always kept, since its key is what names it (a CVE ID):
 //     only the value's unreadable parts are absent.
 //
@@ -34,7 +37,8 @@ import (
 // skipped counts what decoding left out, by path.
 type skipped struct {
 	values  map[string]int // values left absent
-	entries map[string]int // list elements left out, by their unreadable identifying field
+	entries map[string]int // why list elements were left out: the identifying field's path, or the element's own
+	lists   map[string]int // how many elements each list lost ("data[]")
 }
 
 // decodeLoose decodes the JSON object data into the struct v points to. Only
@@ -44,20 +48,13 @@ func decodeLoose(data []byte, v any) (skipped, error) {
 	if !ok {
 		return skipped{}, fmt.Errorf("not a JSON object")
 	}
-	sk := skipped{values: map[string]int{}, entries: map[string]int{}}
+	sk := skipped{values: map[string]int{}, entries: map[string]int{}, lists: map[string]int{}}
 	looseFields(members, reflect.ValueOf(v).Elem(), "", sk)
 	return sk, nil
 }
 
-// dropped reports whether an element of the list at path was left out.
-func (sk skipped) dropped(path string) bool {
-	for p := range sk.entries {
-		if strings.HasPrefix(p, path+".") {
-			return true
-		}
-	}
-	return false
-}
+// dropped reports how many elements the list at path ("data[]") lost.
+func (sk skipped) dropped(path string) int { return sk.lists[path] }
 
 // note says what was left out, or "" when nothing was. raw names where the
 // document can be read as Shodan sent it.
@@ -70,7 +67,7 @@ func (sk skipped) note(raw string) string {
 		parts = append(parts, "left out: "+countList(sk.values))
 	}
 	if len(sk.entries) > 0 {
-		parts = append(parts, "entries left out whole, because the field that identifies them could not be read: "+countList(sk.entries))
+		parts = append(parts, "entries left out whole, because the field that identifies them (or the entry itself) is missing or could not be read: "+countList(sk.entries))
 	}
 	return fmt.Sprintf("Shodan's document held values of a type this tool does not read — %s. Read each as unknown, not as zero, false or empty; %s holds them as Shodan sent them",
 		strings.Join(parts, "; "), raw)
@@ -113,8 +110,8 @@ func objectMembers(data []byte) ([]member, bool) {
 	if tok, err := dec.Token(); err != nil || tok != json.Delim('}') {
 		return nil, false
 	}
-	if _, err := dec.Token(); err == nil {
-		return nil, false // trailing data
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, false // trailing data, valid or not
 	}
 	return out, true
 }
@@ -167,10 +164,25 @@ func looseValue(raw json.RawMessage, rv reflect.Value, path string, sk skipped) 
 			return miss(rv, path, sk)
 		}
 		out := reflect.MakeSlice(t, 0, len(items))
+		elemPath := path + "[]"
+		entries := t.Elem().Kind() == reflect.Struct
 		for _, item := range items {
 			elem := reflect.New(t.Elem()).Elem()
-			if looseValue(item, elem, path+"[]", sk) {
+			switch {
+			case entries && string(item) == "null":
+				// encoding/json would keep a zero entry: a service on port 0.
+				sk.entries[elemPath]++
+				sk.lists[elemPath]++
+			case looseValue(item, elem, elemPath, sk):
 				out = reflect.Append(out, elem)
+			case entries:
+				// Not an object, or a required field failed: the entry is
+				// left out whole and counted as an entry, not a value.
+				if sk.values[elemPath] > 0 {
+					uncount(sk.values, elemPath)
+					sk.entries[elemPath]++
+				}
+				sk.lists[elemPath]++
 			}
 		}
 		rv.Set(out)
@@ -215,27 +227,49 @@ func miss(rv reflect.Value, path string, sk skipped) bool {
 	return false
 }
 
+func uncount(m map[string]int, path string) {
+	if m[path]--; m[path] <= 0 {
+		delete(m, path)
+	}
+}
+
 // looseFields decodes members into the struct rv as encoding/json does: in
 // document order, each member to the field whose name matches exactly or else
 // without regard to case, a later member overriding an earlier one. An
-// embedded struct without a tag takes its fields from the same object. It
-// reports false when a required field was present and could not be read; the
-// field's path is then counted as an entry left out, not as a value.
+// embedded struct without a tag takes its fields from the same object.
+//
+// It reports false when a required field is missing, null, or unreadable in
+// its last occurrence (an earlier unreadable duplicate is overridden, as in
+// encoding/json); the field's path is then counted as the reason its entry
+// was left out, not as a value. A required field must be a leaf — a string or
+// a number — so that one path accounts for it.
 func looseFields(members []member, rv reflect.Value, path string, sk skipped) bool {
 	fields := structFields(rv)
-	ok := true
+	read := map[int]bool{} // required fields: last occurrence read
 	for _, m := range members {
-		f, found := matchField(fields, m.key)
+		i, found := matchField(fields, m.key)
 		if !found {
 			continue
 		}
-		p := join(path, f.name)
-		if !looseValue(m.raw, f.v, p, sk) && f.required {
-			// Counted as the entry left out, not as a value left absent.
-			if sk.values[p]--; sk.values[p] <= 0 {
-				delete(sk.values, p)
-			}
-			sk.entries[p]++
+		f, p := fields[i], join(path, fields[i].name)
+		if !f.required {
+			looseValue(m.raw, f.v, p, sk)
+			continue
+		}
+		if string(m.raw) == "null" {
+			f.v.SetZero()
+			read[i] = false
+			continue
+		}
+		read[i] = looseValue(m.raw, f.v, p, sk)
+		if !read[i] {
+			uncount(sk.values, p)
+		}
+	}
+	ok := true
+	for i, f := range fields {
+		if f.required && !read[i] {
+			sk.entries[join(path, f.name)]++
 			ok = false
 		}
 	}
@@ -274,18 +308,18 @@ func structFields(rv reflect.Value) []field {
 	return out
 }
 
-func matchField(fields []field, key string) (field, bool) {
-	for _, f := range fields {
+func matchField(fields []field, key string) (int, bool) {
+	for i, f := range fields {
 		if f.exact == key {
-			return f, true
+			return i, true
 		}
 	}
-	for _, f := range fields {
+	for i, f := range fields {
 		if strings.EqualFold(f.exact, key) {
-			return f, true
+			return i, true
 		}
 	}
-	return field{}, false
+	return 0, false
 }
 
 func join(path, name string) string {

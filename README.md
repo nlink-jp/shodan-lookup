@@ -190,9 +190,11 @@ and the error-recovery table. `lookup_host` answers within a response budget
 
 Shodan does not hold its fields to one type (measured: an AS number sent as a
 number and as a string within one record). A value of a type this tool does
-not read is left out of the answer — never turned into 0 or false — and named
-in `notes` by its path, for example `data[].http.status (1)`; a service whose
-port cannot be read is left out whole rather than shown as port 0.
+not read is left out of the answer — never turned into 0 — and named in
+`notes` by its path, for example `data[].http.status (1)`; a service whose
+port is missing or cannot be read is left out whole rather than shown as
+port 0. (A CVE's `verified` that cannot be read reads false, which means only
+"not confirmed".)
 Everything else is answered, and the CLI's `--raw` still returns Shodan's
 document as sent.
 

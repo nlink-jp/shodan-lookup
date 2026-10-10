@@ -143,9 +143,16 @@ func (e *Engine) GetHistory(ctx context.Context, q HistoryQuery, refresh bool) (
 		banners = append(banners, histBanner{ws, t})
 	}
 	sort.SliceStable(banners, func(i, j int) bool { return banners[i].ts.After(banners[j].ts) })
-	h.Window = HistoryWindow{Banners: len(w.Data), Cap: HistoryCap, Capped: len(w.Data) >= HistoryCap}
+	// The window is what Shodan returned, counted before anything was left
+	// out: the cap is Shodan's, and a banner this tool could not read was
+	// still one of the 1,000.
+	returned := len(w.Data) + w.skip.dropped("data[]")
+	h.Window = HistoryWindow{Banners: returned, Cap: HistoryCap, Capped: returned >= HistoryCap}
 	if n := len(w.Data) - len(banners); n > 0 {
 		h.Notes = append(h.Notes, fmt.Sprintf("%d banner(s) had no readable timestamp and are left out of the timeline", n))
+	}
+	if n := w.skip.dropped("data[]"); n > 0 {
+		h.Notes = append(h.Notes, fmt.Sprintf("%d banner(s) had no readable port or transport and are left out of the timeline; the window's oldest sighting and a port's first_seen are read from the rest, so either may be later than Shodan's own", n))
 	}
 	if len(banners) > 0 {
 		h.Window.Newest = banners[0].ts.Format(time.RFC3339)

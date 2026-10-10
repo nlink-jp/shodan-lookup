@@ -15,12 +15,15 @@ adheres to [Semantic Versioning](https://semver.org/).
   `notes` name its path (`data[].http.status (1)`); `--raw` returns the
   document as sent. An entry whose identifying field cannot be read (a
   service's port or transport, a match's address, a facet value's count) is
-  left out whole rather than shown as port 0 or count 0, and `get_service`
+  left out whole rather than shown as port 0 or count 0 — whether it is of
+  another type, null or missing — and `get_service`
   then answers `decode_error` instead of `not_observed` for a port it may
   hold. A count whose breakdown could not be read was cached and failed for
   the cache's lifetime; it now answers. Still `decode_error`: a body that is
-  not a JSON object, a host record whose services are not a list, and a
-  search or count without a numeric total. v0.1.1 handled the string fields
+  not a JSON object, a host record whose services or a search answer whose
+  matches are not a list, and a search or count without a numeric total. A
+  history window and its 1,000-banner cap count every banner Shodan
+  returned, the ones left out included. v0.1.1 handled the string fields
   only.
 
 ## [0.1.1] — 2026-10-10

@@ -133,8 +133,10 @@ the Phase 1 measurements"; the essentials:
   unreadable value must never become a value, so: a field stays absent
   (pointers, or a string the projection does not show when empty); a list
   element whose identifying field (`loose:"required"`: a service's port and
-  transport, a match's `ip_str`, a facet value's count) cannot be read is
-  left out whole; a map entry keeps its key (a CVE ID) and only its value's
+  transport, a match's `ip_str`, a facet value's count) is missing, null or
+  unreadable in its last occurrence — or that is null or not an object — is
+  left out whole (a required field must be a leaf); history counts those
+  banners in `window.banners` and the cap, since the cap is Shodan's; a map entry keeps its key (a CVE ID) and only its value's
   unreadable parts are absent. `notes` name each path with a count
   (`data[].http.status (1)`), never a value or a key. `get_service` answers
   `decode_error`, not `not_observed`, when a service was left out whole — it
@@ -142,6 +144,12 @@ the Phase 1 measurements"; the essentials:
   which the tool already defines as "not confirmed". Keys resolve in document
   order as in encoding/json (a later duplicate wins). The string fields go
   through `text` so a number is kept rather than left out.
+  **Residual:** once any service was left out, `get_service` answers
+  `decode_error` for every port with no readable service — also ports that
+  service cannot be (when only its transport was unreadable) — and a port
+  asked without a transport answers the one readable service rather than
+  "more than one service". Both err toward not claiming; the note names the
+  left-out entry.
 - **Timestamps are UTC** (newest observation 2–30 min before `Date`, 3/3) and
   carry no suffix (`2026-10-09T05:01:41.136770`).
 - **IPv6 works**, abbreviated or not, in host lookups and in `ip:` counts

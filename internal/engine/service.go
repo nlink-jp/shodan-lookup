@@ -103,7 +103,7 @@ func (e *Engine) GetService(ctx context.Context, q ServiceQuery, refresh bool) (
 		}
 	}
 	switch {
-	case len(match) == 0 && hb.skip.dropped("data[]"):
+	case len(match) == 0 && hb.skip.dropped("data[]") > 0:
 		// A service was left out because its port or transport could not be
 		// read: it may be this one, so "not observed" would be manufactured.
 		return nil, &shodan.Error{Code: shodan.CodeDecode, Message: fmt.Sprintf(
