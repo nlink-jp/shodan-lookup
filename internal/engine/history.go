@@ -185,6 +185,9 @@ func (e *Engine) GetHistory(ctx context.Context, q HistoryQuery, refresh bool) (
 			h.Notes = append(h.Notes, fmt.Sprintf("%d/%s holds %d of the %d banners", d.Port, d.Transport, d.Banners, len(banners)))
 		}
 	}
+	if n := w.skip.note("the CLI's history --raw"); n != "" {
+		h.Notes = append(h.Notes, n)
+	}
 	h.Notes = append(h.Notes, "a new variant is a change in product, version, page title or certificate; the CLI's history --raw holds every banner in full")
 
 	if q.Port != 0 {
@@ -199,7 +202,13 @@ func (e *Engine) GetHistory(ctx context.Context, q HistoryQuery, refresh bool) (
 
 // loadHistory gates ip and reads its history through the cache, turning a
 // 404 into an answer only after it has been confirmed.
-func (e *Engine) loadHistory(ctx context.Context, ipArg string, refresh bool) (string, *entry, bool, *wireHost, error) {
+// decodedHistory is a decoded history with what decoding left out.
+type decodedHistory struct {
+	wireHost
+	skip skipped
+}
+
+func (e *Engine) loadHistory(ctx context.Context, ipArg string, refresh bool) (string, *entry, bool, *decodedHistory, error) {
 	addr, err := ipaddr.Parse(ipArg)
 	if err != nil {
 		return "", nil, false, nil, err
@@ -214,10 +223,11 @@ func (e *Engine) loadHistory(ctx context.Context, ipArg string, refresh bool) (s
 		return "", nil, false, nil, e.hostError(ctx, ip, err, "its history")
 	}
 	var w wireHost
-	if err := json.Unmarshal(en.Body, &w); err != nil {
-		return "", nil, false, nil, &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's history for " + ip + " is not the shape this tool reads: " + err.Error()}
+	sk, err := decodeLoose(en.Body, &w)
+	if err != nil {
+		return "", nil, false, nil, &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's history for " + ip + " is " + err.Error()}
 	}
-	return ip, en, cached, &w, nil
+	return ip, en, cached, &decodedHistory{wireHost: w, skip: sk}, nil
 }
 
 // RawHistory returns the upstream body of a host's history, for --raw: every

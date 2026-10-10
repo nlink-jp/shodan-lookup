@@ -1,16 +1,16 @@
 package engine
 
 import (
-	"cmp"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"strings"
 	"time"
 )
 
-// The wire types decode only what the projection uses. Pointers mark fields
-// whose absence must stay distinguishable from a zero value; everything else
-// is reachable through --raw.
+// The wire types decode only what the projection uses, through decodeLoose
+// (loose.go): a value of an unexpected type is left out, not fatal. Pointers
+// mark fields whose absence must stay distinguishable from a zero value;
+// everything else is reachable through --raw.
 
 type wireHost struct {
 	IPStr       string        `json:"ip_str"`
@@ -136,11 +136,8 @@ func headerValue(raw json.RawMessage) string {
 
 // text is a scalar Shodan sends as a string without holding it to one type:
 // asn arrives as "AS2497" and as 2497 within one host record (measured,
-// 2026-10-10). Strictly typed, one such field failed the whole record, --raw
-// included. A number is read as its JSON text; anything else is still a shape
-// error — one that encoding/json does not name the field of, so the message
-// says which kind arrived instead. The value itself stays out: title, server
-// and html are written by the investigated host.
+// 2026-10-10). A number is read as its JSON text, so the value is kept
+// rather than left out by decodeLoose; anything else is still left out.
 type text string
 
 func (t *text) UnmarshalJSON(b []byte) error {
@@ -151,8 +148,7 @@ func (t *text) UnmarshalJSON(b []byte) error {
 	}
 	var n json.Number
 	if err := json.Unmarshal(b, &n); err != nil {
-		kind := map[byte]string{'{': "object", '[': "array", 't': "bool", 'f': "bool"}[b[0]]
-		return fmt.Errorf("a string field (org, asn, product, title, …) holds a JSON %s", cmp.Or(kind, "value"))
+		return errors.New("not a string or a number")
 	}
 	*t = text(n)
 	return nil

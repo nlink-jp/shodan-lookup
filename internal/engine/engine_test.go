@@ -685,18 +685,6 @@ func TestAScalarSentAsANumberReads(t *testing.T) {
 	}
 }
 
-// What is neither a string nor a number is still a shape error, and says what
-// arrived.
-func TestAScalarOfAnotherTypeIsADecodeError(t *testing.T) {
-	up := newFake()
-	up.hosts["1.2.3.4"] = strings.Replace(hostFixture, `"asn": "AS64500"`, `"asn": {"n": 64500}`, 1)
-	_, err := testEngine(t, up).LookupHost(context.Background(), "1.2.3.4", false)
-	wantCode(t, err, shodan.CodeDecode)
-	if !strings.Contains(err.Error(), "string field (org, asn") || !strings.Contains(err.Error(), "JSON object") {
-		t.Errorf("the message does not say what arrived: %v", err)
-	}
-}
-
 func TestText(t *testing.T) {
 	for in, want := range map[string]string{`"AS1"`: "AS1", `2497`: "2497", `1.5`: "1.5", `null`: "", `""`: ""} {
 		var v text

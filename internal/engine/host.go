@@ -108,6 +108,7 @@ type hostBody struct {
 	entry  *entry
 	cached bool
 	wire   *wireHost
+	skip   skipped
 }
 
 // loadHost gates ip, reads the host record through the cache, and turns a 404
@@ -127,10 +128,11 @@ func (e *Engine) loadHost(ctx context.Context, ipArg string, refresh bool) (*hos
 		return nil, e.hostError(ctx, ip, err, "the record")
 	}
 	var w wireHost
-	if err := json.Unmarshal(en.Body, &w); err != nil {
-		return nil, &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's host record for " + ip + " is not the shape this tool reads: " + err.Error()}
+	sk, err := decodeLoose(en.Body, &w)
+	if err != nil {
+		return nil, &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's host record for " + ip + " is " + err.Error()}
 	}
-	return &hostBody{ip: ip, entry: en, cached: cached, wire: &w}, nil
+	return &hostBody{ip: ip, entry: en, cached: cached, wire: &w, skip: sk}, nil
 }
 
 const (
@@ -269,6 +271,9 @@ func (e *Engine) project(hb *hostBody) *Host {
 	h.ServiceCount, h.VulnCount = len(h.Services), len(h.Vulns)
 	h.Provenance = provenance(hb.entry, hb.cached)
 	h.Provenance.DocID = docID(hb.entry.Body)
+	if n := hb.skip.note("the CLI's host --raw"); n != "" {
+		h.Notes = append(h.Notes, n)
+	}
 	if h.VulnCount == 0 {
 		h.Notes = append(h.Notes, "no CVEs inferred — Shodan infers vulnerabilities from banner versions; an empty list is not evidence of none")
 	} else {
@@ -362,11 +367,13 @@ func retryHint(what string) string {
 	return " — retry later"
 }
 
-// validHost accepts a body that decodes as a host record.
+// validHost accepts a body that is a JSON object. It gates the cache and
+// --raw, so it asks no more: a value of an unexpected type is the
+// projection's to leave out (decodeLoose), not a reason to lose the record.
 func validHost(body []byte) error {
-	var w wireHost
-	if err := json.Unmarshal(body, &w); err != nil {
-		return &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's host record is not the shape this tool reads: " + err.Error()}
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(body, &obj) != nil || obj == nil {
+		return &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's host record is not a JSON object"}
 	}
 	return nil
 }

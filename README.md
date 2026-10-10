@@ -188,6 +188,12 @@ and the error-recovery table. `lookup_host` answers within a response budget
 — services, banners and CVEs past the defaults are counted in `omitted`, and
 `get_service` reaches every part in full, paged.
 
+Shodan does not hold its fields to one type (measured: an AS number sent as a
+number and as a string within one record). A value of a type this tool does
+not read is left out of the answer and named in `notes` by its path — for
+example `data[].http.status (1)` — while everything else is answered; the
+CLI's `--raw` still returns Shodan's document as sent.
+
 ## Data source and terms
 
 Results are Shodan's data, read under Shodan's

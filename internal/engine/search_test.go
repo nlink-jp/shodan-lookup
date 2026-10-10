@@ -230,11 +230,11 @@ func TestASearch401WithAWorkingKeyIsNotTheKey(t *testing.T) {
 	}
 }
 
-// A page that cannot be projected is not cached after it was paid for, and the
-// error says what was spent.
+// A page that cannot be projected — its matches are not a list — is not cached
+// after it was paid for, and the error says what was spent.
 func TestAnUnprojectablePageIsNotCachedAndSaysWhatItCost(t *testing.T) {
 	up := creditFake(50, 1)
-	up.searchBody = `{"total": 1, "matches": [{"ip_str": "1.2.3.4", "port": "443"}]}`
+	up.searchBody = `{"total": 1, "matches": {"ip_str": "1.2.3.4"}}`
 	e := searchEngine(t, up, 0)
 	_, err := e.SearchServices(context.Background(), SearchQuery{Query: "port:443"}, false)
 	if Code(err) != shodan.CodeDecode || !strings.Contains(err.Error(), "1 credit(s) were spent") {

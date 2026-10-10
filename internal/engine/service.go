@@ -119,6 +119,9 @@ func (e *Engine) GetService(ctx context.Context, q ServiceQuery, refresh bool) (
 	p := &Page{IP: hb.ip, Port: s.Port, Transport: s.Transport, Section: q.Section, Offset: q.Offset}
 	p.Provenance = provenance(hb.entry, hb.cached)
 	p.Provenance.DocID = docID(hb.entry.Body)
+	if n := hb.skip.note("the CLI's host --raw"); n != "" {
+		p.Notes = append(p.Notes, n)
+	}
 
 	switch q.Section {
 	case SectionBanner:

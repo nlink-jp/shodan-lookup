@@ -123,17 +123,14 @@ the Phase 1 measurements"; the essentials:
   `org:1000` all 663.
 - **Scalars are not held to one type** (2026-10-10): one host record carried
   `asn` as `2497` at the top and as both `2497` and `"AS2497"` across its
-  services. Strictly typed, that one field failed the whole record (`--raw`
-  too). The string fields read go through `text` (wire.go): string or number,
-  anything else is still `decode_error` — without the field's name, which
-  encoding/json does not add for a custom unmarshaler.
-  **Residual (independent review, 2026-10-10):** the other fields keep strict
-  types — port, http.status, favicon.hash, the vulns' cvss/epss/verified,
-  headers as an object — and `validHost` / `validSearch` gate the cache and
-  `--raw` on them, so a drift there (not observed) would still fail the whole
-  record, a history window of 1,000 banners, or a paid-for search page. The
-  candidate fix is a minimal gate for cache and raw with strictness kept in
-  the projection, skipping what one service cannot read.
+  services. Strictly typed, that one field failed the whole record, `--raw`
+  included, because the same decode gated the cache. Now the gates
+  (`validHost`, `validSearch`) ask only for a JSON object (and a search's
+  total and matches list), and the projection decodes through `decodeLoose`
+  (loose.go): field by field and element by element, a value it cannot read
+  is left at zero or dropped from its list and named in `notes` by its path
+  (`data[].http.status (1)`) — never by value or map key. The string fields
+  go through `text` so a number is kept rather than dropped.
 - **Timestamps are UTC** (newest observation 2–30 min before `Date`, 3/3) and
   carry no suffix (`2026-10-09T05:01:41.136770`).
 - **IPv6 works**, abbreviated or not, in host lookups and in `ip:` counts

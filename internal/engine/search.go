@@ -292,13 +292,13 @@ func (e *Engine) remaining(ctx context.Context) (int, error) {
 	return q.QueryCredits, nil
 }
 
-// validSearch accepts a body with a total and a list of matches that decode
-// as the projection reads them. Anything looser would let a page that cannot
-// be projected be cached for a day after it was paid for.
+// validSearch accepts a body with a total and a list of matches. A value of
+// an unexpected type inside a match is the projection's to leave out
+// (decodeLoose): a page that was paid for is not lost over one field.
 func validSearch(body []byte) error {
 	var w searchWire
-	if err := json.Unmarshal(body, &w); err != nil {
-		return &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's search answer is not the shape this tool reads: " + err.Error()}
+	if _, err := decodeLoose(body, &w); err != nil {
+		return &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's search answer is " + err.Error()}
 	}
 	if w.Total == nil || w.Matches == nil {
 		return &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's search answer has no total or no matches"}
@@ -317,7 +317,8 @@ type searchWire struct {
 
 func projectSearch(en *entry, cached bool, q SearchQuery) (*Search, error) {
 	var w searchWire
-	if err := json.Unmarshal(en.Body, &w); err != nil || w.Total == nil {
+	sk, err := decodeLoose(en.Body, &w)
+	if err != nil || w.Total == nil {
 		return nil, &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's search answer is not the shape this tool reads"}
 	}
 	s := &Search{Query: q.Query, Page: q.Page, Unit: "services", Total: *w.Total, Rows: []Row{}, Provenance: provenance(en, cached), body: en.Body}
@@ -337,6 +338,9 @@ func projectSearch(en *entry, cached bool, q SearchQuery) (*Search, error) {
 			out.Values = append(out.Values, FacetValue{Value: facetValue(v.Value), Count: v.Count})
 		}
 		s.Facets = append(s.Facets, out)
+	}
+	if n := sk.note("the CLI's search --raw"); n != "" {
+		s.Notes = append(s.Notes, n)
 	}
 	s.Notes = append(s.Notes,
 		"the unit is services (banners), not hosts; a page holds at most 100",
