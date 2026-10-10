@@ -14,10 +14,8 @@ history"), released (versions in CHANGELOG.md).** CLI `host`, `service`, `count`
 `get_service`, `count_services`, `get_history`, `parse_query`,
 `search_services`, `get_quota`, `cache_status`, `get_usage`.
 Phase 2 implemented: `parse_query` / `search_services` (CLI `tokens` /
-`search`) with the credit guard (engine/search.go), and the e2e suite. Next:
-the pre-release independent verification (history, Phase 2 and the fixes
-of the last verification have not been verified independently yet) and the
-release.
+`search`) with the credit guard (engine/search.go), and the e2e suite. Every
+release so far passed an independent verification before it shipped.
 
 Design authority: `docs/ja/shodan-lookup-rfp.ja.md` (primary) and
 `docs/en/shodan-lookup-rfp.md`.
@@ -129,6 +127,13 @@ the Phase 1 measurements"; the essentials:
   too). The string fields read go through `text` (wire.go): string or number,
   anything else is still `decode_error` — without the field's name, which
   encoding/json does not add for a custom unmarshaler.
+  **Residual (independent review, 2026-10-10):** the other fields keep strict
+  types — port, http.status, favicon.hash, the vulns' cvss/epss/verified,
+  headers as an object — and `validHost` / `validSearch` gate the cache and
+  `--raw` on them, so a drift there (not observed) would still fail the whole
+  record, a history window of 1,000 banners, or a paid-for search page. The
+  candidate fix is a minimal gate for cache and raw with strictness kept in
+  the projection, skipping what one service cannot read.
 - **Timestamps are UTC** (newest observation 2–30 min before `Date`, 3/3) and
   carry no suffix (`2026-10-09T05:01:41.136770`).
 - **IPv6 works**, abbreviated or not, in host lookups and in `ip:` counts

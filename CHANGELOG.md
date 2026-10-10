@@ -13,7 +13,8 @@ adheres to [Semantic Versioning](https://semver.org/).
   one type: the same record carried `2497` and `"AS2497"` (measured). The
   string fields the tool reads (org, isp, asn, country, city, os, product,
   version, HTTP title/server/location/html) now accept a string or a number,
-  and the AS number is always written `AS2497`.
+  and a bare AS number is written `AS2497` in the projection (`lookup_host`,
+  `--json`); `--raw` keeps Shodan's own value.
 
 ## [0.1.0] — 2026-10-09
 
