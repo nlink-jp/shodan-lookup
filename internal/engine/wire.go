@@ -30,8 +30,8 @@ type wireHost struct {
 }
 
 type wireService struct {
-	Port      int                     `json:"port"`
-	Transport string                  `json:"transport"`
+	Port      int                     `json:"port" loose:"required"`
+	Transport string                  `json:"transport" loose:"required"`
 	Timestamp string                  `json:"timestamp"`
 	Product   *text                   `json:"product"`
 	Version   *text                   `json:"version"`
@@ -73,6 +73,13 @@ type wireCert struct {
 		SHA1   string `json:"sha1"`
 		SHA256 string `json:"sha256"`
 	} `json:"fingerprint"`
+}
+
+// wireFacetValue is one value of a breakdown; its count is what it says, so
+// a value whose count cannot be read is left out rather than counted 0.
+type wireFacetValue struct {
+	Count int             `json:"count" loose:"required"`
+	Value json.RawMessage `json:"value"`
 }
 
 type wireVuln struct {

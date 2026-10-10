@@ -64,9 +64,13 @@ And these are easy to misread:
 - **`timestamp` / `observed_hours_ago`** say when Shodan saw the service, in
   UTC. The service may have changed since.
 - **A path in `notes`** such as `data[].http.status (1)` names values Shodan
-  sent in a type this tool does not read; they are left out (a status, a
-  score, a list element absent) and everything else is answered. It is not a
-  finding about the host. The CLI's `--raw` has them as Shodan sent them.
+  sent in a type this tool does not read. Read each as unknown: it is absent
+  from the answer, never turned into 0, false or an empty value — except
+  `verified`, which then reads false, meaning only "not confirmed". An entry
+  whose identifying field could not be read (a service's port or transport,
+  a match's address, a facet value's count) is left out whole and listed
+  separately. Everything else is answered. It is not a finding about the
+  host; the CLI's `--raw` has the values as Shodan sent them.
 - **`ssl.expired`** is computed when the answer is built (`expired_as_of`),
   not taken from the observation.
 - **`omitted`** counts what was left out, and appears only when something
@@ -287,7 +291,7 @@ says.
 | `upstream_error` | Shodan failed or answered with something that is not an answer (5xx, an unmapped status, a body over 32 MiB) — including a host Shodan holds services for but would not return | retry later; if it persists, it is upstream's. It is never a negative answer |
 | `network_error` | Shodan could not be reached | check connectivity, then retry |
 | `timeout` | the exchange did not finish in time, or was cancelled | retry; the operator can raise `timeout_seconds` |
-| `decode_error` | Shodan answered success with a body that is not a JSON object (or a search answer without a total or a list of matches) — a value of an unexpected type inside one is left out and named in `notes`, not an error | retry once; if it persists, the API has changed |
+| `decode_error` | Shodan answered success with a body this tool cannot read as a whole: not a JSON object, a host record whose services are not a list, a search or count without a numeric total. Also from `get_service` when the record holds a service whose port or transport could not be read — it may be the one asked for, so it is not `not_observed`. A value of an unexpected type inside a readable body is left out and named in `notes`, not an error | retry once; if it persists, the API has changed; the CLI's `--raw` shows the document |
 | `unknown_tool` | no tool has that name | call `get_usage` for the list |
 | `response_too_large` | the result crossed the server's 128 KB ceiling and was withheld whole | ask for less: fewer ports, a smaller limit, or one section at a time |
 | `internal_error` | a failure nothing classified | report it; retrying the same call is unlikely to help |

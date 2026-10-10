@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -13,50 +14,116 @@ import (
 // whole document — a host record, a history window of 1,000 banners, a page
 // that was paid for — and --raw with it, since the same decode gated the
 // cache. decodeLoose reads a document one field at a time instead, and one
-// array element at a time: a value this tool cannot read is left at its zero
-// value, dropped from its list, and counted under its path.
+// list element at a time.
 //
-// Paths are spelled from the wire types' own JSON names ("data[].http.status",
-// "data[].vulns{}.cvss"); map keys and values never enter them, so they carry
-// no third-party text, and the set of them is bounded by the types.
+// What it cannot read must not turn into a value: a zero port, count or flag
+// would read as a fact. So:
+//   - a field it cannot read stays absent — the wire types make such fields
+//     pointers, or a string whose empty value the projection does not show;
+//   - a list element whose identifying field (tagged loose:"required": a
+//     service's port, a facet value's count) cannot be read is left out
+//     whole, never kept with a zero in that field;
+//   - a map entry is always kept, since its key is what names it (a CVE ID):
+//     only the value's unreadable parts are absent.
+//
+// Every value left out is counted under its path, spelled from the wire
+// types' own JSON names ("data[].http.status", "data[].vulns{}.cvss"); map
+// keys and values never enter a path, so a note carries no third-party text,
+// and the set of paths is bounded by the types.
 
-// skipped counts the values left out, by path.
-type skipped map[string]int
+// skipped counts what decoding left out, by path.
+type skipped struct {
+	values  map[string]int // values left absent
+	entries map[string]int // list elements left out, by their unreadable identifying field
+}
 
 // decodeLoose decodes the JSON object data into the struct v points to. Only
 // a document that is not a JSON object is an error.
 func decodeLoose(data []byte, v any) (skipped, error) {
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(data, &obj); err != nil || obj == nil {
-		return nil, fmt.Errorf("not a JSON object")
+	members, ok := objectMembers(data)
+	if !ok {
+		return skipped{}, fmt.Errorf("not a JSON object")
 	}
-	sk := skipped{}
-	looseFields(obj, reflect.ValueOf(v).Elem(), "", sk)
+	sk := skipped{values: map[string]int{}, entries: map[string]int{}}
+	looseFields(members, reflect.ValueOf(v).Elem(), "", sk)
 	return sk, nil
 }
 
-// note says what was left out, or "" when nothing was. what names the
-// document's raw form, for where the values can still be read.
-func (sk skipped) note(what string) string {
-	if len(sk) == 0 {
+// dropped reports whether an element of the list at path was left out.
+func (sk skipped) dropped(path string) bool {
+	for p := range sk.entries {
+		if strings.HasPrefix(p, path+".") {
+			return true
+		}
+	}
+	return false
+}
+
+// note says what was left out, or "" when nothing was. raw names where the
+// document can be read as Shodan sent it.
+func (sk skipped) note(raw string) string {
+	if len(sk.values) == 0 && len(sk.entries) == 0 {
 		return ""
 	}
-	paths := make([]string, 0, len(sk))
-	n := 0
-	for p, c := range sk {
-		paths = append(paths, fmt.Sprintf("%s (%d)", p, c))
-		n += c
+	var parts []string
+	if len(sk.values) > 0 {
+		parts = append(parts, "left out: "+countList(sk.values))
 	}
-	sort.Strings(paths)
-	return fmt.Sprintf("%d value(s) in Shodan's document were of a type this tool does not read and are left out: %s — %s holds them as Shodan sent them",
-		n, strings.Join(paths, ", "), what)
+	if len(sk.entries) > 0 {
+		parts = append(parts, "entries left out whole, because the field that identifies them could not be read: "+countList(sk.entries))
+	}
+	return fmt.Sprintf("Shodan's document held values of a type this tool does not read — %s. Read each as unknown, not as zero, false or empty; %s holds them as Shodan sent them",
+		strings.Join(parts, "; "), raw)
+}
+
+func countList(m map[string]int) string {
+	out := make([]string, 0, len(m))
+	for p, n := range m {
+		out = append(out, fmt.Sprintf("%s (%d)", p, n))
+	}
+	sort.Strings(out)
+	return strings.Join(out, ", ")
+}
+
+type member struct {
+	key string
+	raw json.RawMessage
+}
+
+// objectMembers splits a JSON object into its members, in document order —
+// the order encoding/json resolves duplicate and case-folded keys by.
+func objectMembers(data []byte) ([]member, bool) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return nil, false
+	}
+	var out []member
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, false
+		}
+		key, _ := tok.(string)
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return nil, false
+		}
+		out = append(out, member{key, raw})
+	}
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('}') {
+		return nil, false
+	}
+	if _, err := dec.Token(); err == nil {
+		return nil, false // trailing data
+	}
+	return out, true
 }
 
 var unmarshalerType = reflect.TypeFor[json.Unmarshaler]()
 
 // looseValue decodes raw into rv and reports whether it was read. A struct
-// is read field by field and always counts as read; a leaf that fails is
-// reset to its zero value and counted.
+// is read field by field; it counts as read unless a required field could
+// not be. A leaf that fails is reset to its zero value and counted.
 func looseValue(raw json.RawMessage, rv reflect.Value, path string, sk skipped) bool {
 	t := rv.Type()
 	isNull := string(raw) == "null"
@@ -72,22 +139,24 @@ func looseValue(raw json.RawMessage, rv reflect.Value, path string, sk skipped) 
 		if t.Elem().Kind() != reflect.Struct || reflect.PointerTo(t.Elem()).Implements(unmarshalerType) {
 			return looseLeaf(raw, rv, path, sk)
 		}
-		elem := reflect.New(t.Elem())
+		elem := rv
+		if rv.IsNil() {
+			elem = reflect.New(t.Elem())
+		}
 		if !looseValue(raw, elem.Elem(), path, sk) {
 			return false
 		}
 		rv.Set(elem)
 		return true
 	case reflect.Struct:
-		var obj map[string]json.RawMessage
-		if json.Unmarshal(raw, &obj) != nil || obj == nil {
-			if isNull {
-				return true
-			}
+		if isNull {
+			return true
+		}
+		members, ok := objectMembers(raw)
+		if !ok {
 			return miss(rv, path, sk)
 		}
-		looseFields(obj, rv, path, sk)
-		return true
+		return looseFields(members, rv, path, sk)
 	case reflect.Slice:
 		if isNull {
 			rv.SetZero()
@@ -114,18 +183,20 @@ func looseValue(raw json.RawMessage, rv reflect.Value, path string, sk skipped) 
 			rv.SetZero()
 			return true
 		}
-		var obj map[string]json.RawMessage
-		if json.Unmarshal(raw, &obj) != nil {
+		members, ok := objectMembers(raw)
+		if !ok {
 			return miss(rv, path, sk)
 		}
-		out := reflect.MakeMapWithSize(t, len(obj))
-		for k, item := range obj {
-			elem := reflect.New(t.Elem()).Elem()
-			if looseValue(item, elem, path+"{}", sk) {
-				out.SetMapIndex(reflect.ValueOf(k).Convert(t.Key()), elem)
-			}
+		if rv.IsNil() {
+			rv.Set(reflect.MakeMapWithSize(t, len(members)))
 		}
-		rv.Set(out)
+		for _, m := range members {
+			// The key names the entry: it is kept even when the value is not
+			// read, and only the value's unreadable parts are absent.
+			elem := reflect.New(t.Elem()).Elem()
+			looseValue(m.raw, elem, path+"{}", sk)
+			rv.SetMapIndex(reflect.ValueOf(m.key).Convert(t.Key()), elem)
+		}
 		return true
 	}
 	return looseLeaf(raw, rv, path, sk)
@@ -140,14 +211,46 @@ func looseLeaf(raw json.RawMessage, rv reflect.Value, path string, sk skipped) b
 
 func miss(rv reflect.Value, path string, sk skipped) bool {
 	rv.SetZero()
-	sk[path]++
+	sk.values[path]++
 	return false
 }
 
-// looseFields decodes the members of obj into the struct rv, matching names
-// as encoding/json does: the tag's name, or the field's name without regard
-// to case. An embedded struct without a tag reads the same object.
-func looseFields(obj map[string]json.RawMessage, rv reflect.Value, path string, sk skipped) {
+// looseFields decodes members into the struct rv as encoding/json does: in
+// document order, each member to the field whose name matches exactly or else
+// without regard to case, a later member overriding an earlier one. An
+// embedded struct without a tag takes its fields from the same object. It
+// reports false when a required field was present and could not be read; the
+// field's path is then counted as an entry left out, not as a value.
+func looseFields(members []member, rv reflect.Value, path string, sk skipped) bool {
+	fields := structFields(rv)
+	ok := true
+	for _, m := range members {
+		f, found := matchField(fields, m.key)
+		if !found {
+			continue
+		}
+		p := join(path, f.name)
+		if !looseValue(m.raw, f.v, p, sk) && f.required {
+			// Counted as the entry left out, not as a value left absent.
+			if sk.values[p]--; sk.values[p] <= 0 {
+				delete(sk.values, p)
+			}
+			sk.entries[p]++
+			ok = false
+		}
+	}
+	return ok
+}
+
+type field struct {
+	name     string // the JSON name, or the Go name in lower case
+	exact    string // what a key must equal to match exactly
+	v        reflect.Value
+	required bool
+}
+
+func structFields(rv reflect.Value) []field {
+	var out []field
 	t := rv.Type()
 	for i := range t.NumField() {
 		f := t.Field(i)
@@ -156,41 +259,33 @@ func looseFields(obj map[string]json.RawMessage, rv reflect.Value, path string, 
 			continue
 		}
 		if f.Anonymous && name == "" && f.Type.Kind() == reflect.Struct {
-			looseFields(obj, rv.Field(i), path, sk)
+			out = append(out, structFields(rv.Field(i))...)
 			continue
 		}
 		if !f.IsExported() {
 			continue
 		}
-		raw, key, ok := member(obj, name, f.Name)
-		if !ok {
-			continue
+		exact := name
+		if exact == "" {
+			exact, name = f.Name, strings.ToLower(f.Name)
 		}
-		looseValue(raw, rv.Field(i), join(path, key), sk)
+		out = append(out, field{name: name, exact: exact, v: rv.Field(i), required: f.Tag.Get("loose") == "required"})
 	}
+	return out
 }
 
-// member finds a field's value, the exact name first and then without regard
-// to case, as encoding/json does. The path names the field by its own name,
-// never by the key Shodan sent.
-func member(obj map[string]json.RawMessage, tag, field string) (json.RawMessage, string, bool) {
-	name := tag
-	if name == "" {
-		name = field
-	}
-	key := tag
-	if key == "" {
-		key = strings.ToLower(field)
-	}
-	if raw, ok := obj[name]; ok {
-		return raw, key, true
-	}
-	for k, raw := range obj {
-		if strings.EqualFold(k, name) {
-			return raw, key, true
+func matchField(fields []field, key string) (field, bool) {
+	for _, f := range fields {
+		if f.exact == key {
+			return f, true
 		}
 	}
-	return nil, "", false
+	for _, f := range fields {
+		if strings.EqualFold(f.exact, key) {
+			return f, true
+		}
+	}
+	return field{}, false
 }
 
 func join(path, name string) string {

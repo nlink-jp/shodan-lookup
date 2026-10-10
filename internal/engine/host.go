@@ -367,13 +367,20 @@ func retryHint(what string) string {
 	return " — retry later"
 }
 
-// validHost accepts a body that is a JSON object. It gates the cache and
-// --raw, so it asks no more: a value of an unexpected type is the
-// projection's to leave out (decodeLoose), not a reason to lose the record.
+// validHost accepts a JSON object whose services, when present, are a list.
+// It gates the cache and --raw, so it asks no more: a value of an unexpected
+// type inside a service is the projection's to leave out (decodeLoose), not a
+// reason to lose the record.
 func validHost(body []byte) error {
-	var obj map[string]json.RawMessage
-	if json.Unmarshal(body, &obj) != nil || obj == nil {
+	var w struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if _, ok := objectMembers(body); !ok || json.Unmarshal(body, &w) != nil {
 		return &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's host record is not a JSON object"}
+	}
+	var list []json.RawMessage
+	if w.Data != nil && json.Unmarshal(w.Data, &list) != nil {
+		return &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's host record holds its services in something other than a list"}
 	}
 	return nil
 }

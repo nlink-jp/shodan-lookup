@@ -8,15 +8,20 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- A value of an unexpected type anywhere in a host record, a history or a
-  search page — a status, a CVSS score, a favicon hash, a list element — no
-  longer fails the whole answer, the cache and `--raw` with it. The answer
-  leaves that value out and names its path in `notes`
-  (`data[].http.status (1)`); `--raw` returns the document as sent. Only a
-  body that is not a JSON object (or a search answer without a total or a
-  list of matches) is still `decode_error`. v0.1.1 handled this for the
-  string fields only; a page that was paid for is no longer lost over one
-  field.
+- A value of an unexpected type anywhere in a host record, a history, a
+  search page or a count — a status, a CVSS score, a favicon hash, a facet
+  count, a list element — no longer fails the whole answer, and the cache
+  and `--raw` with it. The value is left out, never turned into a zero, and
+  `notes` name its path (`data[].http.status (1)`); `--raw` returns the
+  document as sent. An entry whose identifying field cannot be read (a
+  service's port or transport, a match's address, a facet value's count) is
+  left out whole rather than shown as port 0 or count 0, and `get_service`
+  then answers `decode_error` instead of `not_observed` for a port it may
+  hold. A count whose breakdown could not be read was cached and failed for
+  the cache's lifetime; it now answers. Still `decode_error`: a body that is
+  not a JSON object, a host record whose services are not a list, and a
+  search or count without a numeric total. v0.1.1 handled the string fields
+  only.
 
 ## [0.1.1] — 2026-10-10
 

@@ -57,10 +57,13 @@ Go 1.25+. **No external dependencies — standard library only.**
   to `[api]`), present-but-empty values, out-of-range numbers, a missing
   explicit `--config`, and MCP arguments a tool does not declare
   (`decodeArgs`, every tool, including those that take none).
-- **Upstream drift is left out and named, never fatal.** Shodan does not hold
-  its fields to one type. Gates ask only for a JSON object; the projection
-  reads through `decodeLoose` and names what it left out in `notes` by path
-  only. Do not reintroduce a strict decode in front of the cache or `--raw`.
+- **Upstream drift is left out and named, never fatal — and never a value.**
+  Shodan does not hold its fields to one type. Gates ask only for the
+  document's shape; every projection reads through `decodeLoose` and names
+  what it left out in `notes` by path only. An unreadable value stays absent:
+  an entry whose identifying field cannot be read (`loose:"required"`) is
+  left out whole, never kept with a zero. Do not reintroduce a strict decode
+  in front of the cache or `--raw`.
   (The opposite rule holds for the operator's own input, above.)
 - **A negative answer is never manufactured.** The 404 "No information
   available for that IP." also comes from upstream failures, so it becomes

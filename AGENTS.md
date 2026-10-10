@@ -45,7 +45,8 @@ main.go                 CLI entry: main.version → app.Run
 source_test.go          no raw control / bidi character in any source file
 internal/ipaddr/        pre-network gate: IP arguments and every address literal in a query against a finite class table; query lexer
 internal/shodan/        REST client: key in the query only, no URL in any error, redirects refused, pacing, status → codes
-internal/engine/        gate → cache → client → OUR projection; 404 cross-check; name lists; sections; shared by CLI + MCP
+internal/engine/        gate → cache → client → OUR projection; 404 cross-check; name lists; sections; shared by CLI + MCP;
+                        loose.go reads upstream documents field by field (drift is left out and named, never fatal)
 internal/config/        sectioned-TOML subset + SHODAN_LOOKUP_* (+ SHODAN_API_KEY alias); strict; base_url https-only
 internal/cache/         fixed-TTL JSON-file cache; Key = hash over length-prefixed parts; TTL 0 = off; a hit is the bytes put
 internal/termsafe/      the one list of characters a terminal obeys
@@ -124,13 +125,23 @@ the Phase 1 measurements"; the essentials:
 - **Scalars are not held to one type** (2026-10-10): one host record carried
   `asn` as `2497` at the top and as both `2497` and `"AS2497"` across its
   services. Strictly typed, that one field failed the whole record, `--raw`
-  included, because the same decode gated the cache. Now the gates
-  (`validHost`, `validSearch`) ask only for a JSON object (and a search's
-  total and matches list), and the projection decodes through `decodeLoose`
-  (loose.go): field by field and element by element, a value it cannot read
-  is left at zero or dropped from its list and named in `notes` by its path
-  (`data[].http.status (1)`) — never by value or map key. The string fields
-  go through `text` so a number is kept rather than dropped.
+  included, because the same decode gated the cache. Now the gates ask only
+  for the document's shape — `validHost`: a JSON object whose `data`, if
+  present, is a list; `validSearch`: a numeric total and a list of matches;
+  `validCount`: a numeric total — and every projection (host, service,
+  history, search, count) reads through `decodeLoose` (loose.go). An
+  unreadable value must never become a value, so: a field stays absent
+  (pointers, or a string the projection does not show when empty); a list
+  element whose identifying field (`loose:"required"`: a service's port and
+  transport, a match's `ip_str`, a facet value's count) cannot be read is
+  left out whole; a map entry keeps its key (a CVE ID) and only its value's
+  unreadable parts are absent. `notes` name each path with a count
+  (`data[].http.status (1)`), never a value or a key. `get_service` answers
+  `decode_error`, not `not_observed`, when a service was left out whole — it
+  may be the one asked for. A `verified` that cannot be read reads false,
+  which the tool already defines as "not confirmed". Keys resolve in document
+  order as in encoding/json (a later duplicate wins). The string fields go
+  through `text` so a number is kept rather than left out.
 - **Timestamps are UTC** (newest observation 2–30 min before `Date`, 3/3) and
   carry no suffix (`2026-10-09T05:01:41.136770`).
 - **IPv6 works**, abbreviated or not, in host lookups and in `ip:` counts

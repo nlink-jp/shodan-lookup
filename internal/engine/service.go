@@ -103,6 +103,11 @@ func (e *Engine) GetService(ctx context.Context, q ServiceQuery, refresh bool) (
 		}
 	}
 	switch {
+	case len(match) == 0 && hb.skip.dropped("data[]"):
+		// A service was left out because its port or transport could not be
+		// read: it may be this one, so "not observed" would be manufactured.
+		return nil, &shodan.Error{Code: shodan.CodeDecode, Message: fmt.Sprintf(
+			"no readable service on %s port %d%s, but Shodan's record holds a service whose port or transport this tool cannot read — it may be this one; the CLI's host --raw has it. Not evidence that the port is closed", hb.ip, q.Port, transportSuffix(q.Transport))}
 	case len(match) == 0:
 		return nil, &Error{Code: CodeNotObserved, Message: fmt.Sprintf(
 			"Shodan has no banner for %s port %d%s (observed ports: %v) — not evidence that the port is closed", hb.ip, q.Port, transportSuffix(q.Transport), sortedPorts(hb.wire))}

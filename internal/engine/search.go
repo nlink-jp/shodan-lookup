@@ -135,7 +135,7 @@ type Credits struct {
 
 type wireMatch struct {
 	wireService
-	IPStr     string   `json:"ip_str"`
+	IPStr     string   `json:"ip_str" loose:"required"`
 	Org       *text    `json:"org"`
 	Hostnames []string `json:"hostnames"`
 	Location  struct {
@@ -292,13 +292,16 @@ func (e *Engine) remaining(ctx context.Context) (int, error) {
 	return q.QueryCredits, nil
 }
 
-// validSearch accepts a body with a total and a list of matches. A value of
-// an unexpected type inside a match is the projection's to leave out
-// (decodeLoose): a page that was paid for is not lost over one field.
+// validSearch accepts a body with a total and a list of matches. What is
+// inside a match is the projection's to read or leave out (decodeLoose): a
+// page that was paid for is not lost over one field of one match.
 func validSearch(body []byte) error {
-	var w searchWire
-	if _, err := decodeLoose(body, &w); err != nil {
-		return &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's search answer is " + err.Error()}
+	var w struct {
+		Total   *int              `json:"total"`
+		Matches []json.RawMessage `json:"matches"`
+	}
+	if err := json.Unmarshal(body, &w); err != nil {
+		return &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's search answer has no numeric total or no list of matches"}
 	}
 	if w.Total == nil || w.Matches == nil {
 		return &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's search answer has no total or no matches"}
@@ -307,12 +310,9 @@ func validSearch(body []byte) error {
 }
 
 type searchWire struct {
-	Total   *int        `json:"total"`
-	Matches []wireMatch `json:"matches"`
-	Facets  map[string][]struct {
-		Count int             `json:"count"`
-		Value json.RawMessage `json:"value"`
-	} `json:"facets"`
+	Total   *int                        `json:"total"`
+	Matches []wireMatch                 `json:"matches"`
+	Facets  map[string][]wireFacetValue `json:"facets"`
 }
 
 func projectSearch(en *entry, cached bool, q SearchQuery) (*Search, error) {

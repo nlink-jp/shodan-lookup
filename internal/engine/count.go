@@ -115,14 +115,12 @@ func (e *Engine) CountServices(ctx context.Context, query string, facets []Facet
 	}
 
 	var w struct {
-		Total  *int `json:"total"`
-		Facets map[string][]struct {
-			Count int             `json:"count"`
-			Value json.RawMessage `json:"value"`
-		} `json:"facets"`
+		Total  *int                        `json:"total"`
+		Facets map[string][]wireFacetValue `json:"facets"`
 	}
-	if json.Unmarshal(en.Body, &w) != nil || w.Total == nil {
-		return nil, &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's count for the query has no total"}
+	sk, err := decodeLoose(en.Body, &w)
+	if err != nil || w.Total == nil {
+		return nil, &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's count for the query has no numeric total"}
 	}
 	c := &Count{Query: query, Unit: "services", Total: *w.Total, Provenance: provenance(en, cached)}
 	for _, f := range facets {
@@ -134,6 +132,9 @@ func (e *Engine) CountServices(ctx context.Context, query string, facets []Facet
 			c.Notes = append(c.Notes, fmt.Sprintf("Shodan returned no %s breakdown", f.Name))
 		}
 		c.Facets = append(c.Facets, out)
+	}
+	if n := sk.note("the raw answer"); n != "" {
+		c.Notes = append(c.Notes, n)
 	}
 	c.Notes = append(c.Notes, "the unit is services (banners), not hosts: an IP with two matching services counts twice")
 	if len(facets) > 0 {
@@ -278,13 +279,15 @@ func (e *Engine) nameList(ctx context.Context, kind string, get func(context.Con
 	return set, cached, nil
 }
 
-// validCount accepts a count body that carries a total.
+// validCount accepts a count body that carries a numeric total. The
+// projection reads the rest through decodeLoose, so a body this accepts is
+// never an error once cached.
 func validCount(body []byte) error {
 	var c struct {
 		Total *int `json:"total"`
 	}
-	if json.Unmarshal(body, &c) != nil || c.Total == nil {
-		return &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's count has no total"}
+	if _, ok := objectMembers(body); !ok || json.Unmarshal(body, &c) != nil || c.Total == nil {
+		return &shodan.Error{Code: shodan.CodeDecode, Message: "Shodan's count has no numeric total"}
 	}
 	return nil
 }
