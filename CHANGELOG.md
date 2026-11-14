@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.4] — 2026-11-14
+
+### Security
+
+- **Rebuilt with Go 1.27.4, which `go.mod` now requires** (it was `go 1.25.0`).
+  No code of the tool changed. v0.1.3 was built with Go 1.27.2; `govulncheck
+  -mode binary` finds 2 standard-library advisories in its darwin-arm64 binary,
+  in `crypto/x509` and `net/http`: GO-2026-6809, GO-2026-6859. All are fixed by
+  Go 1.27.4. Binary mode shows that an affected function is linked into the
+  binary, not that the tool calls it; each advisory is described at
+  `https://pkg.go.dev/vuln/<ID>`.
+
+### Changed
+
+- `make package` runs `govulncheck ./...` first (`make vuln`) and stops on a
+  finding, so a release cannot be built past one.
+
 ## [0.1.3] — 2026-10-10
 
 ### Fixed
