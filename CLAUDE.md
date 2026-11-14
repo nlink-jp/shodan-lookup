@@ -32,7 +32,7 @@ make e2e         # live against Shodan, credit-free; needs the key; fails if cre
 make e2e-credits # live, SPENDS ONE QUERY CREDIT
 ```
 
-Go 1.25+. **No external dependencies — standard library only.**
+Go 1.27.4+. **No external dependencies — standard library only.**
 
 ## Key conventions
 
