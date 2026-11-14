@@ -28,6 +28,7 @@ make test        # go test -race -cover ./... ; go vet -tags e2e ./...  (offline
 make lint        # golangci-lint (config in .golangci.yml)
 make check       # lint + test + build-all
 make package     # archives per the org Release Archive Standard, notarizes darwin
+make vuln            # govulncheck over the build; `make package` runs it first and stops on a finding
 make verify-release
 make e2e         # live, credit-free; fails without a key and if the remainder moved
 make e2e-credits # live, SPENDS ONE CREDIT: a filtered search, predicted vs actual
