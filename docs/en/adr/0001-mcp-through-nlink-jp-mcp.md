@@ -33,13 +33,25 @@ repository:
    - An unknown tool is -32602 instead of an isError `unknown_tool`, so `CodeUnknownTool` and its usage.md row go.
    - `tools/*` before initialize is -32602, and so are `arguments` that is not an object.
    - A request with `"id":null` gets -32600 (before, `initialize`, `ping` and `tools/list` were answered with a null
-     id).
+     id); so does a request without `"jsonrpc"`.
+   - An unknown method before initialize is -32602 (it was -32601); a batch is -32600 (it was a parse error).
+   - A panic in a tool is answered -32603 and the server goes on (it crashed); up to 256 calls wait behind a running
+     one, more get -32603 "server busy".
    - The version moves from a fixed 2024-11-05 to legacy negotiation and the modern era.
+   - Cache writes go to a temporary file and are renamed, outside any cancellation path, so a cancellation leaves no
+     partial file.
+8. **Signals (policy §2)**: the `mcp` subcommand passes `Serve` a ctx cancelled by SIGINT and SIGTERM.
 5. **Cancellation (policy §5, §8)**: `notifications/cancelled` now cancels the call's ctx. The credit read after a
    search (`engine/search.go`) failing under a cancelled ctx enters `halt` and stops every later search, so that read
    runs under `context.WithoutCancel`: whether the search was charged is checked even when the call was cancelled.
 6. **Dependency**: `github.com/nlink-jp/mcp` is added; "standard library only" in CLAUDE.md and AGENTS.md changes.
 7. **Version**: minor (v0.2.0).
+
+## Defects found (each fixed in its own fix commit)
+
+- The credit read after a search failing under a cancellation stopped every later search (§5).
+- Argument names were matched case-insensitively (`{"IP":...}` passed as `ip`); they are now matched exactly.
+- `mcp` served on `context.Background()`, so SIGINT and SIGTERM killed the process and no cleanup ran.
 
 ## Consequences
 

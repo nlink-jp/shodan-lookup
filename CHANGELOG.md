@@ -19,14 +19,29 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 - An unknown tool is now refused by the protocol (-32602) rather than returned
   as an `unknown_tool` tool result; the code leaves the error vocabulary.
-- Protocol details now follow the module: `tools/list` and `tools/call` before
-  `initialize` are refused with -32602; `arguments` that is not an object is
-  refused with -32602; a request with `"id":null` gets -32600;
-  `notifications/cancelled` now cancels the call. Requests piped in are still
-  all answered before the server exits at end of input.
+- Protocol details now follow the module:
+  - `tools/list`, `tools/call` and unknown methods before `initialize` are
+    refused with -32602 (an unknown method was -32601);
+  - `arguments` that is not an object is refused with -32602;
+  - a request with `"id":null` gets -32600 (`initialize`, `ping` and
+    `tools/list` used to be answered with a null id), and so does one without
+    `"jsonrpc":"2.0"`;
+  - a batch gets -32600 (it was a parse error); a parse error is answered
+    "parse error" without the decoder's detail;
+  - a panic in a tool is answered -32603 and the server goes on (it crashed);
+  - up to 256 calls wait behind a running one; more are refused with -32603
+    "server busy";
+  - `notifications/cancelled` now cancels the call.
+
+  Requests piped in are still all answered before the server exits at end of
+  input.
 
 ### Fixed
 
+- An argument spelt in another case (`{"IP": ...}`, `"Ports"`) was accepted as
+  the declared one; it is now refused by name.
+- SIGINT or SIGTERM ended the MCP server by killing the process; a signal now
+  ends it through its context, so its cleanup runs.
 - A search whose call was cancelled — by `notifications/cancelled`, or at
   shutdown — no longer halts every later search for the process: the credits
   it spent are read even after the cancellation.
