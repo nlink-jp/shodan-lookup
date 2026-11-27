@@ -14,6 +14,9 @@ import (
 	"github.com/nlink-jp/shodan-lookup/internal/mcp"
 )
 
+// notifyContext is signal.NotifyContext; a test stands in for the signal.
+var notifyContext = signal.NotifyContext
+
 // runMCP serves the stdio MCP server until stdin closes (every request that
 // arrived is answered first) or a signal arrives. SIGINT and SIGTERM cancel the
 // server's ctx, so it returns at once and its cleanup runs.
@@ -48,7 +51,7 @@ func runMCP(args []string, version string, stdin io.Reader, stdout, stderr io.Wr
 		Version: version,
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := notifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := srv.Serve(ctx, stdin, stdout); err != nil {
 		fmt.Fprintf(stderr, "shodan-lookup: mcp: %v\n", err)

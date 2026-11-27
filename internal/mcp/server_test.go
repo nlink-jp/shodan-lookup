@@ -14,6 +14,7 @@ import (
 	"github.com/nlink-jp/mcp/probe"
 
 	"github.com/nlink-jp/shodan-lookup/internal/cache"
+	"github.com/nlink-jp/shodan-lookup/internal/engine"
 	"github.com/nlink-jp/shodan-lookup/internal/config"
 )
 
@@ -34,6 +35,12 @@ func testServer(t *testing.T) *Server {
 // dual-era MCP client does (server-migration §6). Nothing here writes the
 // handshake by hand.
 func open(t *testing.T, s *Server) *client.Client {
+	t.Helper()
+	return openWith(t, s, client.Options{})
+}
+
+// openWith is open with the client's options (CancelNotice, say).
+func openWith(t *testing.T, s *Server, opts client.Options) *client.Client {
 	t.Helper()
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
@@ -68,7 +75,8 @@ func open(t *testing.T, s *Server) *client.Client {
 	})
 	octx, ocancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer ocancel()
-	c, err := client.Open(octx, conn, client.Options{Client: mcp.Implementation{Name: "test", Version: "0"}})
+	opts.Client = mcp.Implementation{Name: "test", Version: "0"}
+	c, err := client.Open(octx, conn, opts)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -115,10 +123,13 @@ func TestAgainstTheProbeClients(t *testing.T) {
 		inR, inW := io.Pipe()
 		outR, outW := io.Pipe()
 		ctx, cancel := context.WithCancel(context.Background())
-		go func() { _ = s.Serve(ctx, inR, outW); _ = outW.Close() }()
+		done := make(chan struct{})
+		go func() { _ = s.Serve(ctx, inR, outW); _ = outW.Close(); close(done) }()
 		r := probe.Run(ctx, kind, outR, inW, probe.ClientOptions{StepTimeout: 2 * time.Second})
 		cancel()
 		_ = inW.Close()
+		_ = outR.Close()
+		<-done
 		if want := probe.Expect(kind, probe.ServerDual); r.Outcome != want || len(r.Violations) != 0 || len(r.Warnings) != 0 {
 			t.Errorf("%v probe client: outcome %s (want %s), violations %v, warnings %v, error %s",
 				kind, r.Outcome, want, r.Violations, r.Warnings, r.Error)
@@ -284,5 +295,67 @@ func TestAnArgumentInAnotherCaseIsRefused(t *testing.T) {
 		if !result.IsError || !strings.Contains(text, "unknown field") {
 			t.Errorf("%s was accepted: %s", args, text)
 		}
+	}
+}
+
+// waitingEngine answers lookup_host only when its ctx is cancelled, and says
+// so: it stands in for an upstream call still in flight.
+type waitingEngine struct {
+	fakeEngine
+	cancelled chan error
+}
+
+func (w *waitingEngine) LookupHost(ctx context.Context, _ string, _ bool) (*engine.Host, error) {
+	select {
+	case <-ctx.Done():
+		w.cancelled <- ctx.Err()
+		return nil, ctx.Err()
+	case <-time.After(5 * time.Second):
+		w.cancelled <- nil
+		return nil, errors.New("not cancelled")
+	}
+}
+
+// notifications/cancelled reaches the engine as a cancelled ctx (ADR-0001
+// §5): a client that gives up stops the upstream call. Detaching the
+// handlers' ctx from the call would let it run on, and fails here.
+func TestACancelledCallCancelsTheEngine(t *testing.T) {
+	eng := &waitingEngine{cancelled: make(chan error, 1)}
+	s := testServer(t)
+	s.Eng = eng
+	cl := openWith(t, s, client.Options{CancelNotice: true})
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	if _, err := cl.CallTool(ctx, ToolLookupHost, json.RawMessage(`{"ip":"192.0.2.1"}`), nil); err == nil {
+		t.Fatal("the cancelled call returned a result")
+	}
+	select {
+	case err := <-eng.cancelled:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("the engine's ctx ended with %v, want context.Canceled", err)
+		}
+	case <-time.After(6 * time.Second):
+		t.Fatal("the engine never returned")
+	}
+}
+
+// The listing keeps toolDefinitions' order.
+func TestToolsListKeepsTheDefinitionOrder(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	list, err := open(t, testServer(t)).ListTools(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want, got []string
+	for _, def := range toolDefinitions() {
+		name, _ := def["name"].(string)
+		want = append(want, name)
+	}
+	for _, tl := range list.Tools {
+		got = append(got, tl.Name)
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("tools/list order = %v, want %v", got, want)
 	}
 }
