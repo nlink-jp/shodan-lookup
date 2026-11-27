@@ -28,19 +28,21 @@
    `QueueDepth` は 256、ログは stderr への slog（Warn 以上）。
 3. **ツールの失敗（方針 §3）**: `{code,message}` の isError、`decodeArgs`、128 KB の上限、`capStrings` はいまのまま。
 4. **変わる振る舞い（方針 §4）**:
-   - 未知のツールは、isError の `unknown_tool` ではなく -32602 になる。そこで `CodeUnknownTool` と usage.md の表の行を消す。
+   - 未知のツールは、isError の `unknown_tool`（「call get_usage for the tool list」の手がかりつき）ではなく -32602 になる。そこで `CodeUnknownTool` と usage.md の表の行を消す。
+   - 16 MiB を超えた行は -32600 を返して読み続ける（これまでは `Serve` が誤りを返して終了コード 1 で止まった）。
    - initialize の前の `tools/*` は -32602 になる。オブジェクトでない `arguments` も -32602 になる。
    - `"id":null` の要求は -32600 になる（これまでは `initialize`・`ping`・`tools/list` に id null で答えていた）。`"jsonrpc"` の無い要求も -32600 になる。
    - initialize の前の未知メソッドは -32602 になる（-32601 だった）。バッチは -32600 になる（parse error だった）。
    - ツールの panic は -32603 で答えて続ける（これまでは落ちた）。実行中の呼び出しの後ろで待てるのは 256 件で、それを超えると -32603「server busy」になる。
    - 版は 2024-11-05 固定から、旧方式の交渉と新方式に変わる。
-   - キャッシュの書き込みは一時ファイルから rename し、取り消しの経路も通らないので、取り消しで半端なファイルは残らない。
-8. **シグナル（方針 §2）**: `mcp` サブコマンドは、SIGINT と SIGTERM で取り消される ctx を `Serve` に渡す。
 5. **取り消し（方針 §5・§8）**: `notifications/cancelled` で呼び出しの ctx が取り消されるようになる。検索の後のクレジットの
    読み取り（`engine/search.go`）が取り消された ctx で失敗すると、`halt` に入って以後の検索がすべて止まる。そこで
    この読み取りは `context.WithoutCancel` で行う。検索が課金されたかどうかは、取り消されても確かめる。
+   キャッシュの書き込みは変わらず安全である（応答を一時ファイルに書いて rename し、取り消しの経路も通らない）。
+   取り消しがエンジンに届くことは、試験で確かめる。
 6. **依存**: `github.com/nlink-jp/mcp` を足す。CLAUDE.md・AGENTS.md の「標準ライブラリのみ」を改める。
 7. **版**: minor を上げる（v0.2.0）。
+8. **シグナル（方針 §2）**: `mcp` サブコマンドは、SIGINT と SIGTERM で取り消される ctx を `Serve` に渡す。
 
 ## 見つけた不具合（それぞれ別の fix コミットで直した）
 

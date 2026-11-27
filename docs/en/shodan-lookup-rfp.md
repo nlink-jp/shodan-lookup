@@ -151,7 +151,7 @@ Every upstream-reading command except `quota` accepts `--refresh` and `--json` /
 ### External Dependencies
 
 - The Shodan REST API (`https://api.shodan.io`) only. Authentication is the `key` query parameter; no other mechanism exists.
-- The Go standard library only: no `require` lines in `go.mod`, no MCP SDK and no Shodan library.
+- The Go standard library only: no `require` lines in `go.mod`, no MCP SDK and no Shodan library. *(Note 2026-11-28: the MCP protocol layer now comes from the organization's module nlink-jp/mcp, written on the same rule — ADR-0001, organization ADR-030. There is still no MCP SDK and no Shodan library.)*
 
 ## 3. Design Decisions
 

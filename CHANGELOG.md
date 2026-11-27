@@ -18,7 +18,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - An unknown tool is now refused by the protocol (-32602) rather than returned
-  as an `unknown_tool` tool result; the code leaves the error vocabulary.
+  as an `unknown_tool` tool result (with its hint to call `get_usage`); the code
+  leaves the error vocabulary.
 - Protocol details now follow the module:
   - `tools/list`, `tools/call` and unknown methods before `initialize` are
     refused with -32602 (an unknown method was -32601);
@@ -28,6 +29,8 @@ adheres to [Semantic Versioning](https://semver.org/).
     `"jsonrpc":"2.0"`;
   - a batch gets -32600 (it was a parse error); a parse error is answered
     "parse error" without the decoder's detail;
+  - a line over 16 MiB gets -32600 and reading goes on (it ended the server
+    with an error);
   - a panic in a tool is answered -32603 and the server goes on (it crashed);
   - up to 256 calls wait behind a running one; more are refused with -32603
     "server busy";
@@ -35,6 +38,11 @@ adheres to [Semantic Versioning](https://semver.org/).
 
   Requests piped in are still all answered before the server exits at end of
   input.
+
+- `make vuln` — and so `make package` — scans every platform in `PLATFORMS`,
+  with the environment `build-all` builds each with. It scanned the host's
+  build alone, so an advisory in a Linux- or Windows-only package could not
+  stop a release.
 
 ### Fixed
 
@@ -45,13 +53,6 @@ adheres to [Semantic Versioning](https://semver.org/).
 - A search whose call was cancelled — by `notifications/cancelled`, or at
   shutdown — no longer halts every later search for the process: the credits
   it spent are read even after the cancellation.
-
-### Changed
-
-- `make vuln` — and so `make package` — scans every platform in `PLATFORMS`,
-  with the environment `build-all` builds each with. It scanned the host's
-  build alone, so an advisory in a Linux- or Windows-only package could not
-  stop a release.
 
 ## [0.1.4] — 2026-11-14
 

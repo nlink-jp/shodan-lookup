@@ -173,7 +173,7 @@ MCP の引数と CLI のフラグの対応は、実装時に対応表を 1 つ�
 ### External Dependencies
 
 - Shodan REST API（`https://api.shodan.io`）のみ。認証はクエリ文字列の `key`（それ以外の渡し方は無い）
-- Go 標準ライブラリのみ（`go.mod` に `require` は無い）。MCP SDK も Shodan のライブラリも使わない
+- Go 標準ライブラリのみ（`go.mod` に `require` は無い）。MCP SDK も Shodan のライブラリも使わない *（注記 2026-11-28: MCP のプロトコル層は、同じ規則で書かれた組織のモジュール nlink-jp/mcp から取るようになった。ADR-0001、組織 ADR-030。MCP SDK と Shodan のライブラリは、いまも使わない。）*
 
 ## 3. Design Decisions
 

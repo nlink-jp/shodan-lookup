@@ -30,7 +30,9 @@ repository:
    `QueueDepth` 256, a `slog` to stderr (Warn and above).
 3. **Tool failures (policy §3)**: the `{code,message}` isError, `decodeArgs`, the 128 KB ceiling and `capStrings` stay.
 4. **Behaviour that changes (policy §4)**:
-   - An unknown tool is -32602 instead of an isError `unknown_tool`, so `CodeUnknownTool` and its usage.md row go.
+   - An unknown tool is -32602 instead of an isError `unknown_tool` (which carried the hint "call get_usage for the
+     tool list"), so `CodeUnknownTool` and its usage.md row go.
+   - A line over 16 MiB gets -32600 and reading goes on (it ended `Serve` with an error, exit 1).
    - `tools/*` before initialize is -32602, and so are `arguments` that is not an object.
    - A request with `"id":null` gets -32600 (before, `initialize`, `ping` and `tools/list` were answered with a null
      id); so does a request without `"jsonrpc"`.
@@ -38,14 +40,14 @@ repository:
    - A panic in a tool is answered -32603 and the server goes on (it crashed); up to 256 calls wait behind a running
      one, more get -32603 "server busy".
    - The version moves from a fixed 2024-11-05 to legacy negotiation and the modern era.
-   - Cache writes go to a temporary file and are renamed, outside any cancellation path, so a cancellation leaves no
-     partial file.
-8. **Signals (policy §2)**: the `mcp` subcommand passes `Serve` a ctx cancelled by SIGINT and SIGTERM.
 5. **Cancellation (policy §5, §8)**: `notifications/cancelled` now cancels the call's ctx. The credit read after a
    search (`engine/search.go`) failing under a cancelled ctx enters `halt` and stops every later search, so that read
    runs under `context.WithoutCancel`: whether the search was charged is checked even when the call was cancelled.
+   Cache writes are unchanged and safe: a body is written to a temporary file and renamed, outside any cancellation
+   path. A test pins that a cancellation reaches the engine.
 6. **Dependency**: `github.com/nlink-jp/mcp` is added; "standard library only" in CLAUDE.md and AGENTS.md changes.
 7. **Version**: minor (v0.2.0).
+8. **Signals (policy §2)**: the `mcp` subcommand passes `Serve` a ctx cancelled by SIGINT and SIGTERM.
 
 ## Defects found (each fixed in its own fix commit)
 
