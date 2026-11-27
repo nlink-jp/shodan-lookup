@@ -5,15 +5,18 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/nlink-jp/shodan-lookup/internal/cache"
 	"github.com/nlink-jp/shodan-lookup/internal/config"
 	"github.com/nlink-jp/shodan-lookup/internal/mcp"
 )
 
-// runMCP serves the stdio MCP server until stdin closes. A closing stdin is
-// the shutdown signal: an MCP cancellation notification may be ignored by its
-// receiver, so nothing here depends on one arriving.
+// runMCP serves the stdio MCP server until stdin closes (every request that
+// arrived is answered first) or a signal arrives. SIGINT and SIGTERM cancel the
+// server's ctx, so it returns at once and its cleanup runs.
 func runMCP(args []string, version string, stdin io.Reader, stdout, stderr io.Writer) int {
 	var configPath string
 	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
@@ -45,7 +48,9 @@ func runMCP(args []string, version string, stdin io.Reader, stdout, stderr io.Wr
 		Version: version,
 	}
 
-	if err := srv.Serve(context.Background(), stdin, stdout); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := srv.Serve(ctx, stdin, stdout); err != nil {
 		fmt.Fprintf(stderr, "shodan-lookup: mcp: %v\n", err)
 		return exitError
 	}
