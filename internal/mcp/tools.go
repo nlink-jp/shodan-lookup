@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"strings"
 
 	"github.com/nlink-jp/shodan-lookup/internal/engine"
 )
@@ -266,7 +268,42 @@ func decodeArgs(raw json.RawMessage, into any) error {
 	if err := dec.Decode(into); err != nil {
 		return &argError{code: CodeInvalidArgument, msg: "arguments: " + err.Error()}
 	}
+	// encoding/json matches names case-insensitively, so "IP" or "Ports" would
+	// reach ip and ports. The schema names them in lower case; refuse any other
+	// spelling by name, as an undeclared argument is.
+	var names map[string]json.RawMessage
+	if json.Unmarshal(raw, &names) == nil {
+		declared := jsonNames(into)
+		for n := range names {
+			if !declared[n] {
+				return &argError{code: CodeInvalidArgument, msg: fmt.Sprintf("arguments: json: unknown field %q", n)}
+			}
+		}
+	}
 	return nil
+}
+
+// jsonNames lists the exact json names a decode target declares.
+func jsonNames(into any) map[string]bool {
+	out := map[string]bool{}
+	t := reflect.TypeOf(into)
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return out
+	}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		name := f.Name
+		if tag, ok := f.Tag.Lookup("json"); ok {
+			if n, _, _ := strings.Cut(tag, ","); n != "" {
+				name = n
+			}
+		}
+		out[name] = true
+	}
+	return out
 }
 
 // argError is a structured tool-layer error: a stable code an agent can branch

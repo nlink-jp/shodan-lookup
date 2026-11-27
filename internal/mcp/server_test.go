@@ -267,3 +267,15 @@ func TestUnclassifiedErrorIsInternalNotInvalidArgument(t *testing.T) {
 		t.Errorf("message = %q", got["message"])
 	}
 }
+
+// encoding/json matches names case-insensitively; the schema does not. An
+// argument spelt in another case is refused by name, as an undeclared one is.
+func TestAnArgumentInAnotherCaseIsRefused(t *testing.T) {
+	cl := open(t, testServer(t))
+	for _, args := range []string{`{"IP":"192.0.2.1"}`, `{"ip":"192.0.2.1","Ports":[443]}`} {
+		text, result := callTool(t, cl, "lookup_host", args)
+		if !result.IsError || !strings.Contains(text, "unknown field") {
+			t.Errorf("%s was accepted: %s", args, text)
+		}
+	}
+}
