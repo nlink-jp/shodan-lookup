@@ -65,6 +65,11 @@ type fakeUp struct {
 	facets          []string
 	apiInfo         string
 	calls           []string
+	// cancelDuringSearch, when set, is called inside the search, as if the
+	// caller gave up while it ran; apiInfoHonoursCtx makes /api-info fail on a
+	// cancelled ctx, as the real client does.
+	cancelDuringSearch func()
+	apiInfoHonoursCtx  bool
 }
 
 func newFake() *fakeUp {
@@ -147,8 +152,11 @@ func (f *fakeUp) Facets(context.Context) (*shodan.Response, error) {
 	return resp(string(b), "/shodan/host/search/facets"), nil
 }
 
-func (f *fakeUp) APIInfo(context.Context) (*shodan.Response, error) {
+func (f *fakeUp) APIInfo(ctx context.Context) (*shodan.Response, error) {
 	f.record("apiinfo")
+	if f.apiInfoHonoursCtx && ctx.Err() != nil {
+		return nil, &shodan.Error{Code: shodan.CodeTimeout, Message: "cancelled"}
+	}
 	if f.apiInfoErrAfter > 0 && f.count("apiinfo") > f.apiInfoErrAfter {
 		return nil, &shodan.Error{Code: shodan.CodeTimeout, Message: "timeout"}
 	}
@@ -177,6 +185,9 @@ func (f *fakeUp) Search(_ context.Context, query, facets string, page int) (*sho
 	f.record(fmt.Sprintf("search %s|%s|%d", query, facets, page))
 	if f.credits != nil {
 		*f.credits -= f.charge
+	}
+	if f.cancelDuringSearch != nil {
+		f.cancelDuringSearch()
 	}
 	if f.searchErr != nil {
 		return nil, f.searchErr

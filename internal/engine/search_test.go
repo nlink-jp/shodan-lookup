@@ -259,3 +259,21 @@ func TestASearchMatchWithNumericScalarsReads(t *testing.T) {
 		t.Errorf("row: %+v", r)
 	}
 }
+
+// A call cancelled while its search ran — notifications/cancelled, or the
+// server shutting down — still reads what the search spent. Read under the
+// cancelled ctx, the read failed and halted every later search for the
+// process (server migration, ADR-0001).
+func TestACancelledSearchStillReadsWhatItSpent(t *testing.T) {
+	up := creditFake(50, 1)
+	up.apiInfoHonoursCtx = true
+	e := searchEngine(t, up, 20)
+	ctx, cancel := context.WithCancel(context.Background())
+	up.cancelDuringSearch = cancel
+	_, _ = e.SearchServices(ctx, SearchQuery{Query: "port:443"}, false)
+
+	up.cancelDuringSearch = nil
+	if _, err := e.SearchServices(context.Background(), SearchQuery{Query: "port:443"}, true); err != nil {
+		t.Fatalf("the search after a cancelled one was refused: %v", err)
+	}
+}

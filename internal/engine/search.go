@@ -226,7 +226,10 @@ func (e *Engine) SearchServices(ctx context.Context, q SearchQuery, refresh bool
 
 	// 5. What it actually spent.
 	credits := &Credits{Predicted: predicted, Before: before, Floor: floor}
-	after, aerr := e.remaining(ctx)
+	// Read what it spent even when the call was cancelled: the search may have
+	// been charged, and a read that failed only because the caller gave up
+	// would halt every later search for the process.
+	after, aerr := e.remaining(context.WithoutCancel(ctx))
 	switch {
 	case aerr != nil:
 		e.halt("the credits spent by a search could not be read afterwards (" + Code(aerr) + ")")
