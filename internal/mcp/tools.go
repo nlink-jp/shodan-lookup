@@ -272,38 +272,76 @@ func decodeArgs(raw json.RawMessage, into any) error {
 	// reach ip and ports. The schema names them in lower case; refuse any other
 	// spelling by name, as an undeclared argument is.
 	var names map[string]json.RawMessage
-	if json.Unmarshal(raw, &names) == nil {
-		declared := jsonNames(into)
-		for n := range names {
-			if !declared[n] {
-				return &argError{code: CodeInvalidArgument, msg: fmt.Sprintf("arguments: json: unknown field %q", n)}
-			}
+	if err := json.Unmarshal(raw, &names); err != nil {
+		return &argError{code: CodeInvalidArgument, msg: "arguments: " + err.Error()}
+	}
+	declared := argNames(into)
+	for n := range names {
+		if !declared(n) {
+			return &argError{code: CodeInvalidArgument, msg: fmt.Sprintf("arguments: json: unknown field %q", n)}
 		}
 	}
 	return nil
 }
 
-// jsonNames lists the exact json names a decode target declares.
-func jsonNames(into any) map[string]bool {
-	out := map[string]bool{}
+// argNames reports whether a name is an argument the decode target declares,
+// spelt as declared. A field with an explicit json name accepts that name
+// exactly; a field without one is matched as encoding/json matches it (any
+// case), since no spelling is declared for it; an embedded struct's fields
+// count as the target's own; "-" fields are not arguments. A target that is
+// not a struct (a map, say) declares no names, so every name passes here and
+// is left to the decoder.
+func argNames(into any) func(string) bool {
 	t := reflect.TypeOf(into)
-	for t.Kind() == reflect.Pointer {
+	for t != nil && t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
-	if t.Kind() != reflect.Struct {
-		return out
+	if t == nil || t.Kind() != reflect.Struct {
+		return func(string) bool { return true }
 	}
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
-		name := f.Name
-		if tag, ok := f.Tag.Lookup("json"); ok {
-			if n, _, _ := strings.Cut(tag, ","); n != "" {
-				name = n
+	exact := map[string]bool{}
+	var loose []string
+	var walk func(reflect.Type)
+	walk = func(t reflect.Type) {
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+			tag := f.Tag.Get("json")
+			if tag == "-" {
+				continue
+			}
+			name, _, _ := strings.Cut(tag, ",")
+			if f.Anonymous && name == "" {
+				ft := f.Type
+				for ft.Kind() == reflect.Pointer {
+					ft = ft.Elem()
+				}
+				if ft.Kind() == reflect.Struct {
+					walk(ft)
+					continue
+				}
+			}
+			if !f.IsExported() {
+				continue
+			}
+			if name == "" {
+				loose = append(loose, f.Name)
+			} else {
+				exact[name] = true
 			}
 		}
-		out[name] = true
 	}
-	return out
+	walk(t)
+	return func(n string) bool {
+		if exact[n] {
+			return true
+		}
+		for _, l := range loose {
+			if strings.EqualFold(l, n) {
+				return true
+			}
+		}
+		return false
+	}
 }
 
 // argError is a structured tool-layer error: a stable code an agent can branch

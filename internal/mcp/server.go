@@ -64,8 +64,11 @@ func (s *Server) toolServer() (*mcpserver.ToolServer, error) {
 		if err != nil {
 			return nil, fmt.Errorf("tool %v: %w", def["name"], err)
 		}
-		name, _ := def["name"].(string)
-		desc, _ := def["description"].(string)
+		name, okName := def["name"].(string)
+		desc, okDesc := def["description"].(string)
+		if !okName || !okDesc {
+			return nil, fmt.Errorf("tool %v: name and description must be strings", def["name"])
+		}
 		if err := ts.AddTool(mcpserver.Tool{Name: name, Description: desc, InputSchema: schema}, s.handle); err != nil {
 			return nil, err
 		}
@@ -79,7 +82,12 @@ func (s *Server) toolServer() (*mcpserver.ToolServer, error) {
 func (s *Server) handle(ctx context.Context, req *mcpserver.Request) (*mcpserver.Result, error) {
 	res := s.callTool(ctx, req.Name, req.Arguments)
 	out := &mcpserver.Result{IsError: res["isError"] == true}
-	blocks, _ := res["content"].([]map[string]any)
+	// toolText, toolRawText and toolError build content as []map[string]any;
+	// anything else is a programming error, not an empty success.
+	blocks, ok := res["content"].([]map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("tool %s: result content is %T", req.Name, res["content"])
+	}
 	for _, b := range blocks {
 		raw, err := json.Marshal(b)
 		if err != nil {
