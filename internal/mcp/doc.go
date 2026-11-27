@@ -1,7 +1,7 @@
-// Package mcp is a dependency-free stdio JSON-RPC 2.0 MCP server over the
-// shared engine. In the scaffold it answers cache_status and get_usage; the
-// lookup tools (lookup_host, get_service, count_services, get_quota, and in
-// Phase 2 parse_query and search_services) arrive with the engine.
+// Package mcp serves the shared engine as MCP tools over stdio. The protocol
+// itself — both eras (the legacy initialize handshake and the 2026-07-28
+// revision), framing, versions, cancellation — is the organization's module
+// nlink-jp/mcp (organization ADR-030, ADR-0001); this package holds the tools.
 //
 // This package is where the response budget lives. The engine returns complete
 // views; what one tool result may cost in a client's context is decided here:
@@ -21,6 +21,7 @@
 // Arguments are decoded strictly (decodeArgs): an undeclared argument is
 // refused by name, for every tool including those that take none.
 //
-// A closing stdin is the shutdown signal. An MCP cancellation notification may
-// be ignored by its receiver, so nothing here depends on one arriving.
+// At EOF of stdin every request that arrived is answered, then the server
+// ends. notifications/cancelled cancels the call's ctx: what must survive a
+// cancellation — reading the credits a search spent — runs without it.
 package mcp

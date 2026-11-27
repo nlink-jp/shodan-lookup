@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/nlink-jp/shodan-lookup/internal/engine"
 )
@@ -28,7 +29,6 @@ const (
 // usage.md; a meta-test pins that.
 const (
 	CodeInvalidArgument = "invalid_argument"
-	CodeUnknownTool     = "unknown_tool"
 	// CodeTooLarge: a result crossed the server's byte ceiling and was withheld
 	// whole rather than cut at an arbitrary byte.
 	CodeTooLarge = "response_too_large"
@@ -234,7 +234,9 @@ func (s *Server) dispatch(ctx context.Context, name string, args json.RawMessage
 		}
 		return rawText(UsageDoc()), nil
 	default:
-		return nil, &argError{code: CodeUnknownTool, msg: "unknown tool: " + name + " (call get_usage for the tool list)"}
+		// Not reached: the protocol layer refuses a tool it did not register
+		// (-32602), so an unknown tool never reaches the model as a result.
+		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
 }
 

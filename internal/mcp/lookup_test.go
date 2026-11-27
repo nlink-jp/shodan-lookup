@@ -129,9 +129,8 @@ func lookupServer(t *testing.T, eng *fakeEngine) *Server {
 
 func call(t *testing.T, s *Server, tool string, args string) (map[string]any, string, bool) {
 	t.Helper()
-	resps := serve(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"`+tool+`","arguments":`+args+`}}`)
-	text, result := toolResultText(t, resps[0])
-	isErr := result["isError"] == true
+	text, result := callTool(t, open(t, s), tool, args)
+	isErr := result.IsError
 	var m map[string]any
 	_ = json.Unmarshal([]byte(text), &m)
 	return m, text, isErr

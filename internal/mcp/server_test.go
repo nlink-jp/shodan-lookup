@@ -4,8 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/nlink-jp/mcp"
+	"github.com/nlink-jp/mcp/client"
+	"github.com/nlink-jp/mcp/probe"
 
 	"github.com/nlink-jp/shodan-lookup/internal/cache"
 	"github.com/nlink-jp/shodan-lookup/internal/config"
@@ -24,64 +30,111 @@ func testServer(t *testing.T) *Server {
 	}
 }
 
-// serve feeds newline-delimited frames through the server and returns the
-// decoded responses. This dummy JSON-RPC harness is what reaches the server-
-// side validation paths a schema-checking client would never exercise.
-func serve(t *testing.T, s *Server, frames ...string) []map[string]any {
+// open serves s over pipes and opens it with nlink-jp/mcp's client, the way a
+// dual-era MCP client does (server-migration §6). Nothing here writes the
+// handshake by hand.
+func open(t *testing.T, s *Server) *client.Client {
 	t.Helper()
-	in := strings.NewReader(strings.Join(frames, "\n") + "\n")
-	var out strings.Builder
-	if err := s.Serve(context.Background(), in, &out); err != nil {
-		t.Fatalf("Serve: %v", err)
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- s.Serve(ctx, inR, outW)
+		_ = outW.Close()
+	}()
+	kill := func() { cancel(); _ = inW.Close(); _ = outR.Close() }
+	conn, err := client.NewLineConn(outR, inW, kill, client.LineOptions{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	var resps []map[string]any
-	dec := json.NewDecoder(strings.NewReader(out.String()))
-	for dec.More() {
-		var m map[string]any
-		if err := dec.Decode(&m); err != nil {
-			t.Fatalf("decode response: %v (raw: %s)", err, out.String())
+	octx, ocancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer ocancel()
+	cl, err := client.Open(octx, conn, client.Options{Client: mcp.Implementation{Name: "test", Version: "0"}})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = cl.Close()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("Serve: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Error("Serve did not return after the client closed")
 		}
-		resps = append(resps, m)
-	}
-	return resps
+		kill()
+	})
+	return cl
 }
 
-// toolResultText returns the text of a tools/call result's single content block.
-func toolResultText(t *testing.T, resp map[string]any) (string, map[string]any) {
+// callTool runs one tool. args is the arguments' JSON, or "" for none. It
+// returns the single content block's text and the result.
+func callTool(t *testing.T, cl *client.Client, tool, args string) (string, *client.ToolResult) {
 	t.Helper()
-	result, _ := resp["result"].(map[string]any)
-	if result == nil {
-		t.Fatalf("no result (a protocol error?): %v", resp)
+	res, err := callErr(cl, tool, args)
+	if err != nil {
+		t.Fatalf("%s: %v", tool, err)
 	}
-	content, _ := result["content"].([]any)
-	if len(content) != 1 {
-		t.Fatalf("content blocks = %d, want 1", len(content))
+	if len(res.Content) != 1 {
+		t.Fatalf("content blocks = %d, want 1", len(res.Content))
 	}
-	block, _ := content[0].(map[string]any)
-	text, _ := block["text"].(string)
-	return text, result
+	var block struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(res.Content[0], &block); err != nil {
+		t.Fatalf("%s: content: %v", tool, err)
+	}
+	return block.Text, res
+}
+
+func callErr(cl *client.Client, tool, args string) (*client.ToolResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var a any
+	if args != "" {
+		a = json.RawMessage(args)
+	}
+	return cl.CallTool(ctx, tool, a, nil)
+}
+
+// ADR-030 §7: the server against the three probe clients — legacy only,
+// dual-era, modern only — with the outcomes the specification's
+// compatibility matrix gives for a dual-era server.
+func TestAgainstTheProbeClients(t *testing.T) {
+	for _, kind := range []probe.ClientKind{probe.ClientLegacyOnly, probe.ClientDual, probe.ClientModernOnly} {
+		s := testServer(t)
+		inR, inW := io.Pipe()
+		outR, outW := io.Pipe()
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() { _ = s.Serve(ctx, inR, outW); _ = outW.Close() }()
+		r := probe.Run(ctx, kind, outR, inW, probe.ClientOptions{StepTimeout: 2 * time.Second})
+		cancel()
+		_ = inW.Close()
+		if want := probe.Expect(kind, probe.ServerDual); r.Outcome != want || len(r.Violations) != 0 || len(r.Warnings) != 0 {
+			t.Errorf("%v probe client: outcome %s (want %s), violations %v, warnings %v, error %s",
+				kind, r.Outcome, want, r.Violations, r.Warnings, r.Error)
+		}
+	}
+}
+
+func TestServeRefusesANilInput(t *testing.T) {
+	if err := testServer(t).Serve(context.Background(), nil, io.Discard); err == nil {
+		t.Error("Serve accepted a nil stdin")
+	}
 }
 
 func TestInitializeIdentifiesTheServer(t *testing.T) {
-	resps := serve(t, testServer(t), `{"jsonrpc":"2.0","id":1,"method":"initialize"}`)
-	if len(resps) != 1 {
-		t.Fatalf("got %d responses, want 1", len(resps))
+	cl := open(t, testServer(t))
+	info := cl.Server()
+	if info.Name != "shodan-lookup" {
+		t.Errorf("serverInfo does not name the server: %+v", info)
 	}
-	result, _ := resps[0]["result"].(map[string]any)
-	if result == nil {
-		t.Fatalf("initialize returned no result: %v", resps[0])
+	if info.Version != "test" {
+		t.Errorf("serverInfo.version = %q, want the injected version", info.Version)
 	}
-	if result["protocolVersion"] != protocolVersion {
-		t.Errorf("protocolVersion = %v, want %s", result["protocolVersion"], protocolVersion)
-	}
-	info, _ := result["serverInfo"].(map[string]any)
-	if info == nil || info["name"] != "shodan-lookup" {
-		t.Errorf("serverInfo does not name the server: %v", result["serverInfo"])
-	}
-	if info != nil && info["version"] != "test" {
-		t.Errorf("serverInfo.version = %v, want the injected version", info["version"])
-	}
-	s, _ := result["instructions"].(string)
+	s := cl.Instructions()
 	if !strings.Contains(s, "get_usage") {
 		t.Error("instructions do not point the agent at get_usage")
 	}
@@ -116,13 +169,11 @@ func TestToolTextCarriesNoDefensiveImperatives(t *testing.T) {
 }
 
 // An argument the tool does not declare is refused by name, even for a tool
-// that takes none. Reached through the raw harness on purpose: a
-// schema-checking client would never send this.
+// that takes none. A schema-checking client would never send this; the
+// module's client sends what it is given.
 func TestUndeclaredArgumentsAreRefused(t *testing.T) {
-	resps := serve(t, testServer(t),
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cache_status","arguments":{"verbose":true}}}`)
-	text, result := toolResultText(t, resps[0])
-	if result["isError"] != true {
+	text, result := callTool(t, open(t, testServer(t)), "cache_status", `{"verbose":true}`)
+	if !result.IsError {
 		t.Fatalf("an undeclared argument was accepted: %s", text)
 	}
 	var payload map[string]string
@@ -139,69 +190,26 @@ func TestUndeclaredArgumentsAreRefused(t *testing.T) {
 
 // Absent, null and empty arguments all mean "none".
 func TestNoArgumentsInEverySpelling(t *testing.T) {
-	for _, params := range []string{
-		`{"name":"cache_status"}`,
-		`{"name":"cache_status","arguments":null}`,
-		`{"name":"cache_status","arguments":{}}`,
-	} {
-		resps := serve(t, testServer(t), `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":`+params+`}`)
-		if _, result := toolResultText(t, resps[0]); result["isError"] == true {
-			t.Errorf("%s: refused although it carries no arguments", params)
+	cl := open(t, testServer(t))
+	for _, args := range []string{``, `null`, `{}`} {
+		if _, result := callTool(t, cl, "cache_status", args); result.IsError {
+			t.Errorf("arguments %q: refused although it carries no arguments", args)
 		}
-	}
-}
-
-func TestMalformedFrameGetsParseError(t *testing.T) {
-	resps := serve(t, testServer(t), `{not json`)
-	if len(resps) != 1 {
-		t.Fatalf("got %d responses, want 1", len(resps))
-	}
-	errObj, _ := resps[0]["error"].(map[string]any)
-	if errObj == nil {
-		t.Fatalf("no error object: %v", resps[0])
-	}
-	if code, _ := errObj["code"].(float64); int(code) != -32700 {
-		t.Errorf("code = %v, want -32700", errObj["code"])
-	}
-}
-
-func TestUnknownMethodIsMethodNotFound(t *testing.T) {
-	resps := serve(t, testServer(t), `{"jsonrpc":"2.0","id":1,"method":"resources/list"}`)
-	errObj, _ := resps[0]["error"].(map[string]any)
-	if errObj == nil {
-		t.Fatalf("no error object: %v", resps[0])
-	}
-	if code, _ := errObj["code"].(float64); int(code) != -32601 {
-		t.Errorf("code = %v, want -32601", errObj["code"])
-	}
-}
-
-// Notifications (no id) must not be answered — not even unknown ones.
-func TestNotificationsAreNotAnswered(t *testing.T) {
-	resps := serve(t, testServer(t),
-		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
-		`{"jsonrpc":"2.0","method":"notifications/cancelled"}`,
-		`{"jsonrpc":"2.0","method":"something/unknown"}`,
-	)
-	if len(resps) != 0 {
-		t.Errorf("notifications were answered: %v", resps)
 	}
 }
 
 func TestToolsListNamesEveryTool(t *testing.T) {
-	resps := serve(t, testServer(t), `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
-	result, _ := resps[0]["result"].(map[string]any)
-	tools, _ := result["tools"].([]any)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	list, err := open(t, testServer(t)).ListTools(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	names := map[string]bool{}
-	for _, tl := range tools {
-		m, _ := tl.(map[string]any)
-		if m == nil {
-			t.Fatalf("tool entry is not an object: %v", tl)
-		}
-		name, _ := m["name"].(string)
-		names[name] = true
-		if _, ok := m["inputSchema"]; !ok {
-			t.Errorf("tool %s has no inputSchema", name)
+	for _, tl := range list.Tools {
+		names[tl.Name] = true
+		if len(tl.InputSchema) == 0 {
+			t.Errorf("tool %s has no inputSchema", tl.Name)
 		}
 	}
 	for _, want := range []string{ToolCacheStatus, ToolGetUsage} {
@@ -212,21 +220,17 @@ func TestToolsListNamesEveryTool(t *testing.T) {
 }
 
 func TestGetUsageReturnsTheManual(t *testing.T) {
-	resps := serve(t, testServer(t),
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_usage"}}`)
-	text, result := toolResultText(t, resps[0])
+	text, result := callTool(t, open(t, testServer(t)), "get_usage", "")
 	if !strings.Contains(text, "cache_status") {
 		t.Error("the manual does not document cache_status")
 	}
-	if result["isError"] == true {
+	if result.IsError {
 		t.Error("get_usage reported an error")
 	}
 }
 
 func TestCacheStatusReportsEveryTTL(t *testing.T) {
-	resps := serve(t, testServer(t),
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cache_status"}}`)
-	text, _ := toolResultText(t, resps[0])
+	text, _ := callTool(t, open(t, testServer(t)), "cache_status", "")
 
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(text), &payload); err != nil {
@@ -243,21 +247,13 @@ func TestCacheStatusReportsEveryTTL(t *testing.T) {
 	}
 }
 
-// An unknown tool is a tool result, not a protocol error: the model has to see
-// it. The body is the structured {code, message} vocabulary.
-func TestUnknownToolIsAStructuredToolError(t *testing.T) {
-	resps := serve(t, testServer(t),
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"no_such_tool"}}`)
-	text, result := toolResultText(t, resps[0])
-	if result["isError"] != true {
-		t.Error("unknown tool did not set isError")
-	}
-	var payload map[string]string
-	if err := json.Unmarshal([]byte(text), &payload); err != nil {
-		t.Fatalf("tool error is not structured JSON: %s", text)
-	}
-	if payload["code"] != CodeUnknownTool {
-		t.Errorf("code = %q, want %q", payload["code"], CodeUnknownTool)
+// An unknown tool never reaches a handler: the protocol layer refuses it with
+// -32602 (server-migration §4), so it is not a tool result any more.
+func TestUnknownToolIsAProtocolError(t *testing.T) {
+	_, err := callErr(open(t, testServer(t)), "no_such_tool", "")
+	var e *mcp.Error
+	if !errors.As(err, &e) || e.Code != -32602 {
+		t.Errorf("err = %v, want -32602", err)
 	}
 }
 
@@ -269,15 +265,5 @@ func TestUnclassifiedErrorIsInternalNotInvalidArgument(t *testing.T) {
 	}
 	if got["message"] != "disk on fire" {
 		t.Errorf("message = %q", got["message"])
-	}
-}
-
-func TestBlankLinesAreIgnored(t *testing.T) {
-	resps := serve(t, testServer(t), "", `{"jsonrpc":"2.0","id":1,"method":"ping"}`, "")
-	if len(resps) != 1 {
-		t.Fatalf("got %d responses, want 1", len(resps))
-	}
-	if resps[0]["error"] != nil {
-		t.Errorf("ping failed: %v", resps[0])
 	}
 }

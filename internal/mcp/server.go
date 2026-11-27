@@ -1,24 +1,26 @@
 package mcp
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
+	"log/slog"
+	"os"
+
+	"github.com/nlink-jp/mcp"
+	mcpserver "github.com/nlink-jp/mcp/server"
 
 	"github.com/nlink-jp/shodan-lookup/internal/cache"
 	"github.com/nlink-jp/shodan-lookup/internal/config"
 )
 
-// protocolVersion is the MCP revision this server speaks.
-const protocolVersion = "2024-11-05"
-
 // serverName is what initialize reports, and what a client lists the server as.
 const serverName = "shodan-lookup"
 
-// Server is a stdio JSON-RPC 2.0 MCP server.
+// Server serves the engine as MCP tools over stdio. The protocol — both eras,
+// framing, versions, cancellation — is nlink-jp/mcp's (organization ADR-030,
+// ADR-0001); this type holds the tools.
 type Server struct {
 	Cfg     *config.Config
 	Cache   *cache.Store
@@ -26,133 +28,86 @@ type Server struct {
 	Version string
 }
 
-// Serve reads newline-delimited JSON-RPC messages until stdin closes, which is
-// the shutdown signal.
+// Serve runs the server until stdin reaches EOF (answering every request that
+// arrived), ctx is cancelled, or a write to stdout fails.
 func (s *Server) Serve(ctx context.Context, stdin io.Reader, stdout io.Writer) error {
 	if stdin == nil {
 		return fmt.Errorf("no input stream: the MCP server reads JSON-RPC from stdin")
 	}
-	sc := bufio.NewScanner(stdin)
-	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-	enc := json.NewEncoder(stdout)
+	ts, err := s.toolServer()
+	if err != nil {
+		return err
+	}
+	return ts.Serve(ctx, stdin, stdout)
+}
 
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
+// toolServer registers toolDefinitions, in order, on a fresh protocol server;
+// each handler calls callTool. One is built per Serve.
+func (s *Server) toolServer() (*mcpserver.ToolServer, error) {
+	ts, err := mcpserver.New(mcpserver.Info{
+		Server:       mcp.Implementation{Name: serverName, Version: s.Version},
+		Instructions: instructions,
+	}, mcpserver.Options{
+		// The engine's pacing and the search credit guard assume one call at
+		// a time.
+		Workers: 1,
+		// Calls sent side by side wait, as they did before the module: the
+		// default of 16 would refuse the 17th as "server busy".
+		QueueDepth: 256,
+		Logger:     slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, def := range toolDefinitions() {
+		schema, err := json.Marshal(def["inputSchema"])
+		if err != nil {
+			return nil, fmt.Errorf("tool %v: %w", def["name"], err)
 		}
-		var req request
-		if err := json.Unmarshal([]byte(line), &req); err != nil {
-			// A malformed frame gets a parse error with a null id, per the
-			// JSON-RPC spec. Staying silent would hang the client.
-			if err := enc.Encode(errorResponse(nil, -32700, "parse error: "+err.Error())); err != nil {
-				return err
-			}
-			continue
-		}
-		resp, ok := s.handle(ctx, &req)
-		if !ok {
-			continue // a notification: no reply
-		}
-		if err := enc.Encode(resp); err != nil {
-			return err
+		name, _ := def["name"].(string)
+		desc, _ := def["description"].(string)
+		if err := ts.AddTool(mcpserver.Tool{Name: name, Description: desc, InputSchema: schema}, s.handle); err != nil {
+			return nil, err
 		}
 	}
-	return sc.Err()
+	return ts, nil
 }
 
-type request struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params"`
-}
-
-type response struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id"`
-	Result  any             `json:"result,omitempty"`
-	Error   *rpcError       `json:"error,omitempty"`
-}
-
-type rpcError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
-func errorResponse(id json.RawMessage, code int, msg string) response {
-	return response{JSONRPC: "2.0", ID: id, Error: &rpcError{Code: code, Message: msg}}
-}
-
-func okResponse(id json.RawMessage, result any) response {
-	return response{JSONRPC: "2.0", ID: id, Result: result}
-}
-
-// handle dispatches one message. The second return value is false for
-// notifications, which must not be answered.
-func (s *Server) handle(ctx context.Context, req *request) (response, bool) {
-	isNotification := len(req.ID) == 0 || string(req.ID) == "null"
-
-	switch req.Method {
-	case "initialize":
-		return okResponse(req.ID, map[string]any{
-			"protocolVersion": protocolVersion,
-			"capabilities":    map[string]any{"tools": map[string]any{}},
-			"serverInfo":      map[string]any{"name": serverName, "version": s.Version},
-			"instructions":    instructions,
-		}), true
-
-	case "notifications/initialized", "notifications/cancelled":
-		return response{}, false
-
-	case "ping":
-		return okResponse(req.ID, map[string]any{}), true
-
-	case "tools/list":
-		return okResponse(req.ID, map[string]any{"tools": toolDefinitions()}), true
-
-	case "tools/call":
-		if isNotification {
-			return response{}, false
+// handle runs one tools/call: callTool builds the result, and it is copied
+// into the protocol's shape. The protocol layer has already refused an unknown
+// tool and arguments that are not an object.
+func (s *Server) handle(ctx context.Context, req *mcpserver.Request) (*mcpserver.Result, error) {
+	res := s.callTool(ctx, req.Name, req.Arguments)
+	out := &mcpserver.Result{IsError: res["isError"] == true}
+	blocks, _ := res["content"].([]map[string]any)
+	for _, b := range blocks {
+		raw, err := json.Marshal(b)
+		if err != nil {
+			return nil, err
 		}
-		return s.callTool(ctx, req), true
-
-	default:
-		if isNotification {
-			return response{}, false
-		}
-		return errorResponse(req.ID, -32601, "method not found: "+req.Method), true
+		out.Content = append(out.Content, raw)
 	}
+	return out, nil
 }
 
-type callParams struct {
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments"`
-}
-
-func (s *Server) callTool(ctx context.Context, req *request) response {
-	var p callParams
-	if len(req.Params) > 0 {
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return errorResponse(req.ID, -32602, "invalid params: "+err.Error())
-		}
-	}
-	result, err := s.dispatch(ctx, p.Name, p.Arguments)
+// callTool runs one tool by name and wraps its result as tools/call content.
+func (s *Server) callTool(ctx context.Context, name string, args json.RawMessage) map[string]any {
+	result, err := s.dispatch(ctx, name, args)
 	if err != nil {
 		// Tool failures are results, not protocol errors: the model has to see
 		// them and decide what to do, and a JSON-RPC error would be swallowed
 		// by the client instead.
-		return okResponse(req.ID, toolError(err))
+		return toolError(err)
 	}
 	// get_usage returns the manual itself, which is Markdown rather than a JSON
 	// document — wrapping it in JSON would only make it harder to read. It is
 	// told apart here, after dispatch, so that it goes through the same
 	// argument check as every other tool.
 	if doc, ok := result.(rawText); ok {
-		return okResponse(req.ID, toolRawText(string(doc)))
+		return toolRawText(string(doc))
 	}
 	result, _ = capStrings(result)
-	return okResponse(req.ID, toolText(result))
+	return toolText(result)
 }
 
 // rawText is a tool result that is already the text to return.
