@@ -2,8 +2,8 @@
 
 ## Summary
 
-`shodan-lookup` is a read-only CLI + local MCP server (Go, standard library
-only) that answers what an IP address exposes to the Internet, from the Shodan
+`shodan-lookup` is a read-only CLI + local MCP server (Go: the standard
+library, plus `github.com/nlink-jp/mcp` for the MCP protocol) that answers what an IP address exposes to the Internet, from the Shodan
 REST API with the operator's own API key: open ports, products and versions,
 TLS certificates, inferred CVEs, observation times. Series:
 cybersecurity-series. Module: `github.com/nlink-jp/shodan-lookup`.
@@ -51,7 +51,7 @@ internal/engine/        gate → cache → client → OUR projection; 404 cross-
 internal/config/        sectioned-TOML subset + SHODAN_LOOKUP_* (+ SHODAN_API_KEY alias); strict; base_url https-only
 internal/cache/         fixed-TTL JSON-file cache; Key = hash over length-prefixed parts; TTL 0 = off; a hit is the bytes put
 internal/termsafe/      the one list of characters a terminal obeys
-internal/mcp/           stdio JSON-RPC 2.0 server; the response budget (lookup.go) and its backstops (budget.go); usage.md
+internal/mcp/           MCP tools on nlink-jp/mcp's server.ToolServer (both eras; ADR-0001); the response budget (lookup.go) and its backstops (budget.go); usage.md
 internal/app/           dispatch; host / service / count / history / tokens / search / quota / cache / mcp; text made inert as a whole (forText)
 scripts/                codesign / notarize / brew — byte-identical copies of nlink-jp/.github/templates
 e2e/                    live tests (tags e2e, e2e_credits): the tool end to end, and the upstream traps pinned
@@ -88,6 +88,17 @@ schemas and the strict argument decoding the others received in the
 | `scripts/*` | `nlink-jp/.github/templates` | none (byte-identical) |
 
 ## Gotchas
+
+- **The MCP protocol is nlink-jp/mcp's** (ADR-0001, organization ADR-030 §6).
+  `internal/mcp` never handles `initialize` or `server/discover` itself: `Serve`
+  registers `toolDefinitions()` on a `server.ToolServer` and each handler calls
+  `callTool`. An unknown tool is the module's -32602, not a tool result. Tests
+  drive the server through the module's `client` and its three probe clients;
+  do not write the handshake by hand in a test (the e2e under `e2e/` is the
+  named stand-in for a client).
+- **`notifications/cancelled` cancels the call's ctx.** What must survive a
+  cancellation runs without it: the credit read after a search uses
+  `context.WithoutCancel`, or a cancelled search halts every later one.
 
 Measured 2026-10-09 on a Membership key with credit-free calls only — 17 calls
 before the RFP, then 49 before Phase 1 (credits 100 before and after every

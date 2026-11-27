@@ -6,6 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **The MCP server speaks both eras of the protocol** (ADR-0001): the
+  2026-07-28 revision, whose clients probe with `server/discover`, as well as
+  the earlier `initialize` handshake (2025-11-25, 2025-06-18, 2024-11-05; it was
+  fixed at 2024-11-05). The protocol layer is now the organization's shared
+  module nlink-jp/mcp (organization ADR-030); the tools, their arguments and
+  their results are unchanged.
+
+### Changed
+
+- An unknown tool is now refused by the protocol (-32602) rather than returned
+  as an `unknown_tool` tool result; the code leaves the error vocabulary.
+- Protocol details now follow the module: `tools/list` and `tools/call` before
+  `initialize` are refused with -32602; `arguments` that is not an object is
+  refused with -32602; a request with `"id":null` gets -32600;
+  `notifications/cancelled` now cancels the call. Requests piped in are still
+  all answered before the server exits at end of input.
+
+### Fixed
+
+- A search whose call was cancelled — by `notifications/cancelled`, or at
+  shutdown — no longer halts every later search for the process: the credits
+  it spent are read even after the cancellation.
+
 ### Changed
 
 - `make vuln` — and so `make package` — scans every platform in `PLATFORMS`,

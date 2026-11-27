@@ -32,7 +32,9 @@ make e2e         # live against Shodan, credit-free; needs the key; fails if cre
 make e2e-credits # live, SPENDS ONE QUERY CREDIT
 ```
 
-Go 1.27.4+. **No external dependencies — standard library only.**
+Go 1.27.4+. **No third-party dependencies** — the standard library, plus nlink-jp
+modules written on the same rule (`github.com/nlink-jp/mcp` for the MCP
+protocol, organization ADR-030; ADR-0001).
 
 ## Key conventions
 
