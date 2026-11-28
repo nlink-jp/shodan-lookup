@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-28
+
 ### Changed
 
 - **The MCP tools run on the organization's tool-conventions module,
