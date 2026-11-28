@@ -36,7 +36,7 @@ type QueryReading struct {
 func (e *Engine) ParseQuery(ctx context.Context, query string) (*QueryReading, error) {
 	terms, err := ipaddr.CheckQuery(query)
 	if err != nil {
-		return nil, err
+		return nil, refused("query", err)
 	}
 	if err := e.checkKey(); err != nil {
 		return nil, err
@@ -160,11 +160,11 @@ func (e *Engine) SearchServices(ctx context.Context, q SearchQuery, refresh bool
 		q.Page = 1
 	}
 	if q.Page < 1 || q.Page > MaxSearchPage {
-		return nil, invalid(fmt.Sprintf("page must be between 1 and %d", MaxSearchPage))
+		return nil, invalid("page", fmt.Sprintf("page must be between 1 and %d", MaxSearchPage))
 	}
 	terms, err := ipaddr.CheckQuery(q.Query)
 	if err != nil {
-		return nil, err
+		return nil, refused("query", err)
 	}
 	if err := e.checkKey(); err != nil {
 		return nil, err

@@ -116,7 +116,7 @@ type hostBody struct {
 func (e *Engine) loadHost(ctx context.Context, ipArg string, refresh bool) (*hostBody, error) {
 	addr, err := ipaddr.Parse(ipArg)
 	if err != nil {
-		return nil, err
+		return nil, refused("ip", err)
 	}
 	if err := e.checkKey(); err != nil {
 		return nil, err
@@ -154,7 +154,7 @@ func (e *Engine) hostError(ctx context.Context, ip string, err error, what strin
 	}
 	switch se.APIError {
 	case invalidIP:
-		return invalid(fmt.Sprintf("Shodan does not accept %q as an IP address", ip))
+		return invalid("ip", fmt.Sprintf("Shodan does not accept %q as an IP address", ip))
 	case noInformation:
 	default:
 		return err

@@ -80,16 +80,16 @@ type ServiceQuery struct {
 // tell that the record underneath changed between two pages.
 func (e *Engine) GetService(ctx context.Context, q ServiceQuery, refresh bool) (*Page, error) {
 	if !contains(Sections, q.Section) {
-		return nil, invalid(fmt.Sprintf("section %q is not one of %s", q.Section, strings.Join(Sections, ", ")))
+		return nil, invalid("section", fmt.Sprintf("section %q is not one of %s", q.Section, strings.Join(Sections, ", ")))
 	}
 	if q.Port < 1 || q.Port > 65535 {
-		return nil, invalid(fmt.Sprintf("port %d is not between 1 and 65535", q.Port))
+		return nil, invalid("port", fmt.Sprintf("port %d is not between 1 and 65535", q.Port))
 	}
 	if q.Transport != "" && q.Transport != "tcp" && q.Transport != "udp" {
-		return nil, invalid(fmt.Sprintf("transport %q is not tcp or udp", q.Transport))
+		return nil, invalid("transport", fmt.Sprintf("transport %q is not tcp or udp", q.Transport))
 	}
 	if q.Offset < 0 {
-		return nil, invalid("offset must not be negative")
+		return nil, invalid("offset", "offset must not be negative")
 	}
 	hb, err := e.loadHost(ctx, q.IP, refresh)
 	if err != nil {
@@ -136,7 +136,7 @@ func (e *Engine) GetService(ctx context.Context, q ServiceQuery, refresh bool) (
 		for range onPort {
 			ts = append(ts, "one whose transport could not be read")
 		}
-		return nil, invalid(fmt.Sprintf("%s port %d has more than one service (%s); pass transport", hb.ip, q.Port, strings.Join(ts, ", ")))
+		return nil, invalid("transport", fmt.Sprintf("%s port %d has more than one service (%s); pass transport", hb.ip, q.Port, strings.Join(ts, ", ")))
 	}
 	s := match[0]
 
@@ -211,12 +211,12 @@ func pageText(p *Page, text string, limit int) error {
 		limit = DefaultTextLimit
 	}
 	if limit < 1 || limit > MaxTextLimit {
-		return invalid(fmt.Sprintf("limit for a text section must be between 1 and %d characters", MaxTextLimit))
+		return invalid("limit", fmt.Sprintf("limit for a text section must be between 1 and %d characters", MaxTextLimit))
 	}
 	r := []rune(text)
 	p.Unit, p.Total = unitChars, len(r)
 	if p.Offset > len(r) {
-		return invalid(fmt.Sprintf("offset %d is past the end of the section (%d characters)", p.Offset, len(r)))
+		return invalid("offset", fmt.Sprintf("offset %d is past the end of the section (%d characters)", p.Offset, len(r)))
 	}
 	end := min(p.Offset+limit, len(r))
 	p.Text = string(r[p.Offset:end])
@@ -231,11 +231,11 @@ func pageItems(p *Page, items []any, limit int) error {
 		limit = DefaultListLimit
 	}
 	if limit < 1 || limit > MaxListLimit {
-		return invalid(fmt.Sprintf("limit for a list section must be between 1 and %d items", MaxListLimit))
+		return invalid("limit", fmt.Sprintf("limit for a list section must be between 1 and %d items", MaxListLimit))
 	}
 	p.Unit, p.Total = unitItems, len(items)
 	if p.Offset > len(items) {
-		return invalid(fmt.Sprintf("offset %d is past the end of the section (%d items)", p.Offset, len(items)))
+		return invalid("offset", fmt.Sprintf("offset %d is past the end of the section (%d items)", p.Offset, len(items)))
 	}
 	end := min(p.Offset+limit, len(items))
 	p.Items = items[p.Offset:end]

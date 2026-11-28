@@ -50,12 +50,12 @@ func ParseFacet(s string) (FacetSpec, error) {
 	name, n, hasN := strings.Cut(strings.TrimSpace(s), ":")
 	f := FacetSpec{Name: name, N: DefaultFacetValues}
 	if name == "" {
-		return f, invalid(fmt.Sprintf("facet %q has no name", s))
+		return f, invalid("facets", fmt.Sprintf("facet %q has no name", s))
 	}
 	if hasN {
 		v, err := strconv.Atoi(n)
 		if err != nil || v < 1 || v > MaxFacetValues {
-			return f, invalid(fmt.Sprintf("facet %q: the count after ':' must be an integer from 1 to %d", s, MaxFacetValues))
+			return f, invalid("facets", fmt.Sprintf("facet %q: the count after ':' must be an integer from 1 to %d", s, MaxFacetValues))
 		}
 		f.N = v
 	}
@@ -94,7 +94,7 @@ type FacetValue struct {
 func (e *Engine) CountServices(ctx context.Context, query string, facets []FacetSpec, refresh bool) (*Count, error) {
 	terms, err := ipaddr.CheckQuery(query)
 	if err != nil {
-		return nil, err
+		return nil, refused("query", err)
 	}
 	if err := e.checkKey(); err != nil {
 		return nil, err
@@ -170,7 +170,7 @@ func (e *Engine) checkNames(ctx context.Context, terms []ipaddr.Term, facets []F
 			return planRestricted("facet", f.Name)
 		}
 		if seen[f.Name] {
-			return invalid(fmt.Sprintf("facet %q is asked for twice", f.Name))
+			return invalid("facets", fmt.Sprintf("facet %q is asked for twice", f.Name))
 		}
 		seen[f.Name] = true
 	}
@@ -178,7 +178,7 @@ func (e *Engine) checkNames(ctx context.Context, terms []ipaddr.Term, facets []F
 		if n, err := e.unknownName(ctx, "filters", e.up.Filters, filterNames, refresh); err != nil {
 			return err
 		} else if n != "" {
-			return invalid(fmt.Sprintf("%q is not a Shodan filter name (filter names are lower case; to search for the text, quote it). Shodan would read it as free text and match nothing", n+":"))
+			return invalid("query", fmt.Sprintf("%q is not a Shodan filter name (filter names are lower case; to search for the text, quote it). Shodan would read it as free text and match nothing", n+":"))
 		}
 	}
 	if len(facets) > 0 {
@@ -189,7 +189,7 @@ func (e *Engine) checkNames(ctx context.Context, terms []ipaddr.Term, facets []F
 		if n, err := e.unknownName(ctx, "facets", e.up.Facets, names, refresh); err != nil {
 			return err
 		} else if n != "" {
-			return invalid(fmt.Sprintf("%q is not a Shodan facet name. Shodan would drop it without saying so", n))
+			return invalid("facets", fmt.Sprintf("%q is not a Shodan facet name. Shodan would drop it without saying so", n))
 		}
 	}
 	return nil
@@ -231,7 +231,7 @@ func checkValue(t ipaddr.Term) error {
 		// Written as tools print it: AB:CD:… (OpenSSL, browsers), spaced, any case.
 		v = strings.NewReplacer(":", "", " ", "").Replace(v)
 		if len(v) == 64 && isHex(v) {
-			return invalid("ssl.cert.fingerprint matches a certificate's SHA-1 (40 hex digits); a SHA-256 matches nothing, without an error (measured). Use the sha1 that lookup_host reports")
+			return invalid("query", "ssl.cert.fingerprint matches a certificate's SHA-1 (40 hex digits); a SHA-256 matches nothing, without an error (measured). Use the sha1 that lookup_host reports")
 		}
 	}
 	return nil

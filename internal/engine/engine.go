@@ -63,9 +63,27 @@ const (
 type Error struct {
 	Code    string
 	Message string
+	// Argument names the MCP tool argument an invalid_argument is about
+	// ("ip", "query", "facets", "port", ...), so the MCP layer can say which
+	// (ADR-0002). "" for any other error. The CLI does not read it.
+	Argument string
+	err      error // what a refusal of the input gate wraps
 }
 
 func (e *Error) Error() string { return e.Message }
+
+// Unwrap returns the input gate's error a refusal wraps, if any.
+func (e *Error) Unwrap() error { return e.err }
+
+// Argument returns the tool argument err is about, or "" when it is not an
+// argument error or does not say.
+func Argument(err error) string {
+	var ee *Error
+	if errors.As(err, &ee) {
+		return ee.Argument
+	}
+	return ""
+}
 
 // Code returns the stable code of an engine, gate or client error, or "" when
 // err is none of those.
@@ -81,7 +99,16 @@ func Code(err error) string {
 	return shodan.Code(err)
 }
 
-func invalid(msg string) error { return &Error{Code: CodeInvalidArgument, Message: msg} }
+// invalid refuses the argument arg with msg.
+func invalid(arg, msg string) error {
+	return &Error{Code: CodeInvalidArgument, Message: msg, Argument: arg}
+}
+
+// refused is the input gate's refusal (an *ipaddr.Error) of the argument
+// arg, with the gate's message and code unchanged.
+func refused(arg string, err error) error {
+	return &Error{Code: CodeInvalidArgument, Message: err.Error(), Argument: arg, err: err}
+}
 
 // Upstream is the part of the Shodan client the engine calls, so tests can
 // stand in for it.

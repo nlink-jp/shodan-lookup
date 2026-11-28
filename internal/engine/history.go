@@ -112,20 +112,20 @@ type histBanner struct {
 // services for (measured), and that is never reported as "not indexed".
 func (e *Engine) GetHistory(ctx context.Context, q HistoryQuery, refresh bool) (*History, error) {
 	if q.Port < 0 || q.Port > 65535 {
-		return nil, invalid(fmt.Sprintf("port %d is not between 1 and 65535", q.Port))
+		return nil, invalid("port", fmt.Sprintf("port %d is not between 1 and 65535", q.Port))
 	}
 	if q.Transport != "" && q.Transport != "tcp" && q.Transport != "udp" {
-		return nil, invalid(fmt.Sprintf("transport %q is not tcp or udp", q.Transport))
+		return nil, invalid("transport", fmt.Sprintf("transport %q is not tcp or udp", q.Transport))
 	}
 	if q.Offset < 0 {
-		return nil, invalid("offset must not be negative")
+		return nil, invalid("offset", "offset must not be negative")
 	}
 	limit := q.Limit
 	if limit == 0 {
 		limit = DefaultListLimit
 	}
 	if limit < 1 || limit > MaxListLimit {
-		return nil, invalid(fmt.Sprintf("limit must be between 1 and %d observations", MaxListLimit))
+		return nil, invalid("limit", fmt.Sprintf("limit must be between 1 and %d observations", MaxListLimit))
 	}
 	ip, en, cached, w, err := e.loadHistory(ctx, q.IP, refresh)
 	if err != nil {
@@ -218,7 +218,7 @@ type decodedHistory struct {
 func (e *Engine) loadHistory(ctx context.Context, ipArg string, refresh bool) (string, *entry, bool, *decodedHistory, error) {
 	addr, err := ipaddr.Parse(ipArg)
 	if err != nil {
-		return "", nil, false, nil, err
+		return "", nil, false, nil, refused("ip", err)
 	}
 	if err := e.checkKey(); err != nil {
 		return "", nil, false, nil, err
@@ -286,12 +286,12 @@ func observationsPage(byPort map[string][]histBanner, q HistoryQuery, limit int,
 		return nil, &Error{Code: CodeNotObserved, Message: fmt.Sprintf(
 			"Shodan's history has no banner for port %d%s between %s and %s — not evidence that the port was closed", q.Port, transportSuffix(q.Transport), orUnknown(w.Oldest), orUnknown(w.Newest))}
 	case len(keys) > 1:
-		return nil, invalid(fmt.Sprintf("port %d has history on more than one transport (%s); pass transport", q.Port, strings.Join(keys, ", ")))
+		return nil, invalid("transport", fmt.Sprintf("port %d has history on more than one transport (%s); pass transport", q.Port, strings.Join(keys, ", ")))
 	}
 	bs := byPort[keys[0]]
 	page := &ObservationsPage{Port: bs[0].Port, Transport: bs[0].Transport, Total: len(bs), Offset: q.Offset, Items: []Observation{}}
 	if q.Offset > len(bs) {
-		return nil, invalid(fmt.Sprintf("offset %d is past the end (%d observations)", q.Offset, len(bs)))
+		return nil, invalid("offset", fmt.Sprintf("offset %d is past the end (%d observations)", q.Offset, len(bs)))
 	}
 	end := min(q.Offset+limit, len(bs))
 	for _, b := range bs[q.Offset:end] {
