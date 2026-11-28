@@ -217,7 +217,9 @@ func TestClipEscaped(t *testing.T) {
 		{"x<y", 3, "x<y", false},             // < > & are not escaped on the wire (ADR-0002)
 		{"a&b<c>d", 4, "a&b<…", true},        // one byte each
 		{"\u0001ab", 7, "\u0001a…", true},    // a control character is six
-		{"\xffab", 4, "\xffa…", true},        // an invalid byte is written as U+FFFD, three bytes; the cut is after it
+		{"\xffab", 4, "\xffa…", true},        // an invalid byte is written as U+FFFD, three bytes
+		{"x\xffabc", 6, "x\xffab…", true},    // the cut is after it, where the source has it
+		{"x\xffz", 7, "x\xffz", false},       // five bytes sent: nothing to cut (it read past the end before)
 		{"\xff\xffcd", 6, "\xff\xff…", true}, // and the source is walked byte by byte there
 	} {
 		got, cut := clipEscaped(tc.in, tc.max)
@@ -286,6 +288,9 @@ func TestLookupHostRefusesBadArguments(t *testing.T) {
 		ports[i] = fmt.Sprint(i + 1)
 	}
 	wantArgErr(t, cl, ToolLookupHost, `{"ip":"1.2.3.4","ports":[`+strings.Join(ports, ",")+`]}`, mcptool.CodeInvalidArguments, "ports")
+	if text, res := callTool(t, cl, ToolLookupHost, `{"ip":"1.2.3.4","ports":[`+strings.Join(ports[:mcpMaxPorts], ",")+`]}`); res.IsError {
+		t.Errorf("%d ports, the bound, were refused: %s", mcpMaxPorts, text)
+	}
 }
 
 func TestEngineCodesPassThrough(t *testing.T) {
@@ -614,16 +619,17 @@ func TestEveryToolShortensAnUngovernedString(t *testing.T) {
 func TestOverMeasuresWhatIsSent(t *testing.T) {
 	rows := make([]string, 0, 4900)
 	for len(rows) < cap(rows) {
-		rows = append(rows, strings.Repeat("r", 20))
+		rows = append(rows, strings.Repeat("r", 18)+"<&") // HTML characters: escaped, they would not fit
 	}
 	v := map[string]any{"rows": rows}
 	sent, _ := wire(v)
+	escaped, _ := json.Marshal(v)
 	indented, _ := json.MarshalIndent(v, "", "  ")
-	if len(sent) > softBudget || len(indented) <= softBudget {
-		t.Fatalf("the fixture is %d bytes sent and %d indented; it must straddle %d", len(sent), len(indented), softBudget)
+	if len(sent) > softBudget || len(escaped) <= softBudget || len(indented) <= softBudget {
+		t.Fatalf("the fixture is %d bytes sent, %d escaped and %d indented; it must straddle %d", len(sent), len(escaped), len(indented), softBudget)
 	}
 	if over(v) {
-		t.Error("over measured the indented form")
+		t.Error("over measured an escaped or indented form")
 	}
 	if !over(map[string]any{"rows": append(rows, rows[:1000]...)}) {
 		t.Error("over did not see a result past the soft budget")

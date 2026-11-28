@@ -35,12 +35,13 @@ adheres to [Semantic Versioning](https://semver.org/).
   inside the tool and again at the ceiling, and a shortened string, at 1001
   characters with its mark, was shortened again). It is now shortened to 1000
   characters, the mark included, and named once.
-- A banner holding an invalid UTF-8 byte could be cut in the wrong place when
-  `lookup_host` shortened it: the cut advanced three bytes for a one-byte
-  invalid byte, dropping or splitting the characters after it. The cut now
-  follows the source, and the shortening counts exactly the bytes sent (`\b`
-  and `\f` as two, an invalid byte as the three of U+FFFD), where it counted
-  six for each before.
+- A banner holding an invalid UTF-8 byte was cut in the wrong place when
+  `lookup_host` shortened it: the cut advanced three bytes through the banner
+  for a one-byte invalid byte, so it kept up to two bytes past the limit,
+  could split a multi-byte character, and failed the call when the invalid
+  byte was within two bytes of the end. The cut now follows the banner, and
+  the shortening counts exactly the bytes sent (`\b` and `\f` as two, an
+  invalid byte and U+FFFD as three), where it counted six for each before.
 
 ## [0.2.1] - 2026-11-28
 
