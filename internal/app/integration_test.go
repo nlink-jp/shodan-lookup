@@ -210,7 +210,9 @@ func TestInternalAddressesAreNeverSent(t *testing.T) {
 	f := online(t)
 	for _, args := range [][]string{{"host", "10.0.0.1"}, {"host", "::ffff:192.168.1.1"}, {"count", "net:10.0.0.0/8"}, {"service", "172.16.0.1", "22", "--section", "banner"}} {
 		_, errOut, code := runCLI(args...)
-		if code != exitError || !strings.Contains(errOut, "invalid_argument") {
+		// The whole code, in reportError's parentheses: the MCP server's
+		// invalid_arguments contains it, and the CLI keeps invalid_argument.
+		if code != exitError || !strings.Contains(errOut, "(invalid_argument)\n") {
 			t.Errorf("%v: exit %d, %s", args, code, errOut)
 		}
 	}
@@ -278,7 +280,7 @@ func TestCount(t *testing.T) {
 		"vuln:CVE-1":     "plan_restricted",
 	} {
 		_, errOut, code := runCLI("count", args)
-		if code != exitError || !strings.Contains(errOut, want) {
+		if code != exitError || !strings.Contains(errOut, "("+want+")\n") {
 			t.Errorf("%s: exit %d %s", args, code, errOut)
 		}
 	}

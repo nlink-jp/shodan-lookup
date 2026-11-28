@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -29,6 +30,7 @@ type fakeEngine struct {
 	histPorts  int // ports in the history; 0: one port
 	rows       int
 	gotSearch  engine.SearchQuery
+	notes      []string // added to every result's notes, which nothing thins (a copy each call: the backstop shortens in place)
 }
 
 func (f *fakeEngine) LookupHost(_ context.Context, ip string, _ bool) (*engine.Host, error) {
@@ -61,6 +63,7 @@ func (f *fakeEngine) LookupHost(_ context.Context, ip string, _ bool) (*engine.H
 		h.Hostnames = append(h.Hostnames, fmt.Sprintf("host-%05d.shared.example.test", i))
 	}
 	h.ServiceCount, h.VulnCount = len(h.Services), len(h.Vulns)
+	h.Notes = append(h.Notes, f.notes...)
 	return h, nil
 }
 
@@ -69,17 +72,17 @@ func (f *fakeEngine) GetService(_ context.Context, q engine.ServiceQuery, _ bool
 	if f.page != nil {
 		return f.page, nil
 	}
-	return &engine.Page{IP: q.IP, Port: q.Port, Section: q.Section}, nil
+	return &engine.Page{IP: q.IP, Port: q.Port, Section: q.Section, Notes: slices.Clone(f.notes)}, nil
 }
 
 func (f *fakeEngine) CountServices(_ context.Context, q string, facets []engine.FacetSpec, _ bool) (*engine.Count, error) {
 	f.gotFacets = facets
-	return &engine.Count{Query: q, Unit: "services", Total: 3}, nil
+	return &engine.Count{Query: q, Unit: "services", Total: 3, Notes: slices.Clone(f.notes)}, nil
 }
 
 func (f *fakeEngine) GetHistory(_ context.Context, q engine.HistoryQuery, _ bool) (*engine.History, error) {
 	f.gotHistory = q
-	h := &engine.History{IP: q.IP, Window: engine.HistoryWindow{Banners: 30, Cap: engine.HistoryCap}}
+	h := &engine.History{IP: q.IP, Window: engine.HistoryWindow{Banners: 30, Cap: engine.HistoryCap}, Notes: slices.Clone(f.notes)}
 	ports := max(f.histPorts, 1)
 	for n := 0; n < ports; n++ {
 		p := engine.PortHistory{Port: 443 + n, Transport: "tcp", Observations: 30}
@@ -93,7 +96,7 @@ func (f *fakeEngine) GetHistory(_ context.Context, q engine.HistoryQuery, _ bool
 }
 
 func (f *fakeEngine) ParseQuery(_ context.Context, q string) (*engine.QueryReading, error) {
-	return &engine.QueryReading{Query: q, Filters: []string{"port"}, PredictedCost: 1}, nil
+	return &engine.QueryReading{Query: q, Filters: []string{"port"}, PredictedCost: 1, Notes: slices.Clone(f.notes)}, nil
 }
 
 func (f *fakeEngine) SearchServices(_ context.Context, q engine.SearchQuery, _ bool) (*engine.Search, error) {
@@ -101,7 +104,7 @@ func (f *fakeEngine) SearchServices(_ context.Context, q engine.SearchQuery, _ b
 	if f.err != nil {
 		return nil, f.err
 	}
-	res := &engine.Search{Query: q.Query, Page: max(q.Page, 1), Unit: "services", Total: 1000, Rows: []engine.Row{}}
+	res := &engine.Search{Query: q.Query, Page: max(q.Page, 1), Unit: "services", Total: 1000, Rows: []engine.Row{}, Notes: slices.Clone(f.notes)}
 	for i := 0; i < f.rows; i++ {
 		res.Rows = append(res.Rows, engine.Row{IP: "1.2.3.4", Port: i, Transport: "tcp", Title: strings.Repeat("t", f.rich), Hostnames: []string{strings.Repeat("h", f.rich)}})
 	}
@@ -118,7 +121,7 @@ func (f *fakeEngine) SearchServices(_ context.Context, q engine.SearchQuery, _ b
 }
 
 func (f *fakeEngine) GetQuota(context.Context) (*engine.Quota, error) {
-	return &engine.Quota{Plan: "dev", PlanName: "Membership", QueryCredits: 100}, nil
+	return &engine.Quota{Plan: "dev", PlanName: "Membership", QueryCredits: 100, Notes: slices.Clone(f.notes)}, nil
 }
 
 func lookupServer(t *testing.T, eng *fakeEngine) *Server {
@@ -211,10 +214,10 @@ func TestClipEscaped(t *testing.T) {
 		{"日本語テキスト", 7, "日本…", true}, // 3 bytes each, never split
 		{`a"b"c`, 4, `a"b…`, true},  // a + \" + b is exactly 4 escaped bytes
 		{`a"b"c`, 3, `a"…`, true},
-		{"x<y", 3, "x<y", false},          // < > & are not escaped on the wire (ADR-0002)
-		{"a&b<c>d", 4, "a&b<…", true},     // one byte each
-		{"\u0001ab", 7, "\u0001a…", true}, // a control character is six
-		{"\xffab", 4, "\xffa…", true},   // an invalid byte is written as U+FFFD, three bytes; the cut is after it
+		{"x<y", 3, "x<y", false},             // < > & are not escaped on the wire (ADR-0002)
+		{"a&b<c>d", 4, "a&b<…", true},        // one byte each
+		{"\u0001ab", 7, "\u0001a…", true},    // a control character is six
+		{"\xffab", 4, "\xffa…", true},        // an invalid byte is written as U+FFFD, three bytes; the cut is after it
 		{"\xff\xffcd", 6, "\xff\xff…", true}, // and the source is walked byte by byte there
 	} {
 		got, cut := clipEscaped(tc.in, tc.max)
@@ -278,6 +281,11 @@ func TestLookupHostRefusesBadArguments(t *testing.T) {
 	} {
 		wantArgErr(t, cl, ToolLookupHost, c.args, c.code, c.arg)
 	}
+	ports := make([]string, mcpMaxPorts+1)
+	for i := range ports {
+		ports[i] = fmt.Sprint(i + 1)
+	}
+	wantArgErr(t, cl, ToolLookupHost, `{"ip":"1.2.3.4","ports":[`+strings.Join(ports, ",")+`]}`, mcptool.CodeInvalidArguments, "ports")
 }
 
 func TestEngineCodesPassThrough(t *testing.T) {
@@ -546,4 +554,78 @@ func TestLargeFacetsAreThinnedNotWithheld(t *testing.T) {
 	}
 	wantArgErr(t, open(t, lookupServer(t, &fakeEngine{rows: 1})), ToolSearchServices,
 		`{"query":"port:443","facets":["a","b","c","d","e","f"]}`, mcptool.CodeInvalidArguments, "facets")
+}
+
+// engineCalls is one call of every tool that answers from the engine.
+var engineCalls = map[string]string{
+	ToolLookupHost:     `{"ip":"1.2.3.4"}`,
+	ToolGetService:     `{"ip":"1.2.3.4","port":443,"section":"banner"}`,
+	ToolCountServices:  `{"query":"port:22"}`,
+	ToolGetHistory:     `{"ip":"1.2.3.4"}`,
+	ToolParseQuery:     `{"query":"port:22"}`,
+	ToolSearchServices: `{"query":"port:22"}`,
+	ToolGetQuota:       `{}`,
+}
+
+// Every tool holds its answer to the ceiling: one that nothing thins (its
+// notes, here) is withheld whole, never sent past 128 KB.
+func TestEveryToolHoldsItsAnswerToTheCeiling(t *testing.T) {
+	notes := make([]string, 200) // 200 x 900 characters: over the ceiling whatever else is cut
+	for i := range notes {
+		notes[i] = strings.Repeat("n", 900)
+	}
+	cl := open(t, lookupServer(t, &fakeEngine{notes: notes}))
+	for tool, args := range engineCalls {
+		if e := toolErr(t, cl, tool, args); e.Code != CodeTooLarge {
+			t.Errorf("%s: %s %s, want %s", tool, e.Code, e.Message, CodeTooLarge)
+		}
+	}
+}
+
+// Every tool's answer goes through the backstop: an ungoverned string past
+// 1000 characters comes back shortened, and the answer says so.
+func TestEveryToolShortensAnUngovernedString(t *testing.T) {
+	cl := open(t, lookupServer(t, &fakeEngine{notes: []string{strings.Repeat("n", fieldClip+500)}}))
+	for tool, args := range engineCalls {
+		text, res := callTool(t, cl, tool, args)
+		if res.IsError {
+			t.Errorf("%s: %s", tool, text)
+			continue
+		}
+		var m struct {
+			Notes []string `json:"notes"`
+		}
+		if err := json.Unmarshal([]byte(text), &m); err != nil {
+			t.Fatalf("%s: %v", tool, err)
+		}
+		shortened, said := false, false
+		for _, n := range m.Notes {
+			shortened = shortened || (strings.HasPrefix(n, "nnn") && len([]rune(n)) == fieldClip)
+			said = said || strings.Contains(n, "shortened here")
+		}
+		if !shortened || !said {
+			t.Errorf("%s: shortened %v, said so %v: %.300s", tool, shortened, said, text)
+		}
+	}
+}
+
+// Thinning measures what is sent: a result under the soft budget as sent,
+// though over it indented, is not thinned.
+func TestOverMeasuresWhatIsSent(t *testing.T) {
+	rows := make([]string, 0, 4900)
+	for len(rows) < cap(rows) {
+		rows = append(rows, strings.Repeat("r", 20))
+	}
+	v := map[string]any{"rows": rows}
+	sent, _ := wire(v)
+	indented, _ := json.MarshalIndent(v, "", "  ")
+	if len(sent) > softBudget || len(indented) <= softBudget {
+		t.Fatalf("the fixture is %d bytes sent and %d indented; it must straddle %d", len(sent), len(indented), softBudget)
+	}
+	if over(v) {
+		t.Error("over measured the indented form")
+	}
+	if !over(map[string]any{"rows": append(rows, rows[:1000]...)}) {
+		t.Error("over did not see a result past the soft budget")
+	}
 }

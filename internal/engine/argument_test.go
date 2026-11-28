@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/nlink-jp/shodan-lookup/internal/ipaddr"
+	"github.com/nlink-jp/shodan-lookup/internal/shodan"
 )
 
 const sha256Hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -15,7 +16,15 @@ const sha256Hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abc
 // unchanged.
 func TestEveryArgumentRefusalNamesItsArgument(t *testing.T) {
 	ctx := context.Background()
-	e := testEngine(t, newFake())
+	up := newFake()
+	// Shodan's own refusal of an address the local gate let through.
+	up.hostErr["1.2.3.5"] = &shodan.Error{Code: shodan.CodeUpstream, Status: 404, APIError: "Invalid IP"}
+	// A history with port 53 on both transports.
+	up.histories["1.2.3.4"] = `{"ip_str":"1.2.3.4","ports":[53,443],"data":[` +
+		`{"port":53,"transport":"udp","timestamp":"2026-10-07T01:00:00.000000","data":"u","_shodan":{"module":"dns-udp"}},` +
+		`{"port":53,"transport":"tcp","timestamp":"2026-10-07T02:00:00.000000","data":"t","_shodan":{"module":"dns-tcp"}},` +
+		`{"port":443,"transport":"tcp","timestamp":"2026-10-07T03:00:00.000000","data":"h","_shodan":{"module":"https"}}]}`
+	e := testEngine(t, up)
 	host := func(ip string) func() error {
 		return func() error { _, err := e.LookupHost(ctx, ip, false); return err }
 	}
@@ -41,17 +50,23 @@ func TestEveryArgumentRefusalNamesItsArgument(t *testing.T) {
 	}{
 		{"an internal ip", host("10.0.0.1"), "ip"},
 		{"a hostname", host("example.com"), "ip"},
+		{"an address Shodan refuses", host("1.2.3.5"), "ip"},
 		{"history of an internal ip", history(HistoryQuery{IP: "192.168.0.1"}), "ip"},
 		{"history port out of range", history(HistoryQuery{IP: "1.2.3.4", Port: 70000}), "port"},
 		{"history transport", history(HistoryQuery{IP: "1.2.3.4", Port: 22, Transport: "sctp"}), "transport"},
 		{"history offset", history(HistoryQuery{IP: "1.2.3.4", Port: 22, Offset: -1}), "offset"},
 		{"history limit", history(HistoryQuery{IP: "1.2.3.4", Port: 22, Limit: MaxListLimit + 1}), "limit"},
+		{"history of a port on two transports", history(HistoryQuery{IP: "1.2.3.4", Port: 53}), "transport"},
+		{"history offset past the end", history(HistoryQuery{IP: "1.2.3.4", Port: 443, Offset: 100}), "offset"},
 		{"service section", service(ServiceQuery{IP: "1.2.3.4", Port: 22, Section: "nope"}), "section"},
 		{"service port", service(ServiceQuery{IP: "1.2.3.4", Section: SectionBanner}), "port"},
 		{"service transport", service(ServiceQuery{IP: "1.2.3.4", Port: 22, Transport: "x", Section: SectionBanner}), "transport"},
 		{"service offset", service(ServiceQuery{IP: "1.2.3.4", Port: 22, Offset: -1, Section: SectionBanner}), "offset"},
 		{"service text limit", service(ServiceQuery{IP: "1.2.3.4", Port: 22, Limit: MaxTextLimit + 1, Section: SectionBanner}), "limit"},
 		{"service offset past the end", service(ServiceQuery{IP: "1.2.3.4", Port: 22, Offset: 1 << 20, Section: SectionBanner}), "offset"},
+		{"a service port on two transports", service(ServiceQuery{IP: "1.2.3.4", Port: 53, Section: SectionBanner}), "transport"},
+		{"a list section's limit", service(ServiceQuery{IP: "1.2.3.4", Port: 443, Limit: MaxListLimit + 1, Section: SectionVulns}), "limit"},
+		{"a list section's offset past the end", service(ServiceQuery{IP: "1.2.3.4", Port: 443, Offset: 1 << 20, Section: SectionVulns}), "offset"},
 		{"an internal address in a query", count("net:10.0.0.0/8"), "query"},
 		{"an unclosed quote", count(`http.title:"x`), "query"},
 		{"an unknown filter", count("nosuchfilter:x"), "query"},
