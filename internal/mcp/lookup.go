@@ -180,13 +180,16 @@ func clipEscaped(s string, max int) (string, bool) {
 		return s, false
 	}
 	n, end := 0, 0
-	for i, r := range s {
+	for end < len(s) {
+		// size is the source's width: 1 for an invalid byte, which is written
+		// as a three-byte U+FFFD.
+		r, size := utf8.DecodeRuneInString(s[end:])
 		w := escapedRuneLen(r)
 		if n+w > max {
 			break
 		}
 		n += w
-		end = i + utf8.RuneLen(r)
+		end += size
 	}
 	return s[:end] + "…", true
 }
@@ -199,13 +202,16 @@ func escapedLen(s string) int {
 	return n
 }
 
+// escapedRuneLen is how many bytes wire writes for r (measured against
+// encoding/json, TestEscapedLenIsWhatIsSent): the short escapes are two bytes,
+// any other control character and the line separators six, and everything
+// else — < > & and DEL included — as itself. An invalid byte reaches here as
+// utf8.RuneError and is written as that rune, three bytes.
 func escapedRuneLen(r rune) int {
 	switch {
-	case r == '"' || r == '\\' || r == '\n' || r == '\r' || r == '\t':
+	case r == '"' || r == '\\' || r == '\n' || r == '\r' || r == '\t' || r == '\b' || r == '\f':
 		return 2
 	case r < 0x20 || r == 0x2028 || r == 0x2029:
-		return 6
-	case r == utf8.RuneError:
 		return 6
 	default:
 		return utf8.RuneLen(r)

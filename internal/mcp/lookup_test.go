@@ -180,6 +180,25 @@ func TestBannersAreCappedAfterEscaping(t *testing.T) {
 	}
 }
 
+// escapedLen is what wire writes for the string, byte for byte: every ASCII
+// character, the line separators, a replacement character and an invalid byte
+// (written as U+FFFD, three bytes), and multi-byte text.
+func TestEscapedLenIsWhatIsSent(t *testing.T) {
+	cases := []string{"\u2028", "\u2029", "\uFFFD", "\xff", "\xc3", "日本", "😀", "a\xffb"}
+	for c := 0; c < 0x80; c++ {
+		cases = append(cases, string(rune(c)))
+	}
+	for _, s := range cases {
+		b, err := wire(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := escapedLen(s), len(b)-2; got != want {
+			t.Errorf("escapedLen(%q) = %d, wire writes %d", s, got, want)
+		}
+	}
+}
+
 func TestClipEscaped(t *testing.T) {
 	for _, tc := range []struct {
 		in   string
@@ -195,6 +214,8 @@ func TestClipEscaped(t *testing.T) {
 		{"x<y", 3, "x<y", false},          // < > & are not escaped on the wire (ADR-0002)
 		{"a&b<c>d", 4, "a&b<…", true},     // one byte each
 		{"\u0001ab", 7, "\u0001a…", true}, // a control character is six
+		{"\xffab", 4, "\xffa…", true},   // an invalid byte is written as U+FFFD, three bytes; the cut is after it
+		{"\xff\xffcd", 6, "\xff\xff…", true}, // and the source is walked byte by byte there
 	} {
 		got, cut := clipEscaped(tc.in, tc.max)
 		if got != tc.want || cut != tc.cut {
