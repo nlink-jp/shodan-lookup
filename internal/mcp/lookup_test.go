@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nlink-jp/mcptool"
+
 	"github.com/nlink-jp/shodan-lookup/internal/engine"
 )
 
@@ -190,7 +192,9 @@ func TestClipEscaped(t *testing.T) {
 		{"日本語テキスト", 7, "日本…", true}, // 3 bytes each, never split
 		{`a"b"c`, 4, `a"b…`, true},  // a + \" + b is exactly 4 escaped bytes
 		{`a"b"c`, 3, `a"…`, true},
-		{"x<y", 3, "x…", true},
+		{"x<y", 3, "x<y", false},          // < > & are not escaped on the wire (ADR-0002)
+		{"a&b<c>d", 4, "a&b<…", true},     // one byte each
+		{"\u0001ab", 7, "\u0001a…", true}, // a control character is six
 	} {
 		got, cut := clipEscaped(tc.in, tc.max)
 		if got != tc.want || cut != tc.cut {
@@ -243,11 +247,15 @@ func TestAHugeHostIsThinnedNotWithheld(t *testing.T) {
 
 func TestLookupHostRefusesBadArguments(t *testing.T) {
 	s := lookupServer(t, &fakeEngine{services: 1})
-	for _, args := range []string{`{}`, `{"ip":"1.2.3.4","ports":[0]}`, `{"ip":"1.2.3.4","ports":[70000]}`, `{"ip":"1.2.3.4","port":443}`} {
-		_, text, isErr := call(t, s, ToolLookupHost, args)
-		if !isErr || !strings.Contains(text, CodeInvalidArgument) {
-			t.Errorf("%s: %s", args, text)
-		}
+	cl := open(t, s)
+	for _, c := range []struct{ args, code, arg string }{
+		{`{}`, mcptool.CodeMissingArgument, "ip"},
+		{`{"ip":""}`, mcptool.CodeInvalidArguments, "ip"},
+		{`{"ip":"1.2.3.4","ports":[0]}`, mcptool.CodeInvalidArguments, "ports"},
+		{`{"ip":"1.2.3.4","ports":[70000]}`, mcptool.CodeInvalidArguments, "ports"},
+		{`{"ip":"1.2.3.4","port":443}`, mcptool.CodeInvalidArguments, "port"},
+	} {
+		wantArgErr(t, cl, ToolLookupHost, c.args, c.code, c.arg)
 	}
 }
 
@@ -271,15 +279,17 @@ func TestGetServiceLimits(t *testing.T) {
 	if _, _, isErr := call(t, s, ToolGetService, `{"ip":"1.2.3.4","port":443,"section":"banner"}`); isErr || eng.gotService.Limit != 0 {
 		t.Errorf("text default should be the engine's (0), got %d", eng.gotService.Limit)
 	}
-	for _, args := range []string{
-		`{"ip":"1.2.3.4","port":443,"section":"vulns","limit":51}`,
-		`{"ip":"1.2.3.4","port":443,"section":"banner","limit":16001}`,
-		`{"ip":"1.2.3.4","port":443,"section":"banner","limit":0}`,
-		`{"ip":"1.2.3.4","section":"banner"}`,
+	cl := open(t, s)
+	for _, c := range []struct{ args, code, arg string }{
+		{`{"ip":"1.2.3.4","port":443,"section":"vulns","limit":51}`, mcptool.CodeInvalidArguments, "limit"},
+		{`{"ip":"1.2.3.4","port":443,"section":"banner","limit":16001}`, mcptool.CodeInvalidArguments, "limit"},
+		{`{"ip":"1.2.3.4","port":443,"section":"banner","limit":0}`, mcptool.CodeInvalidArguments, "limit"},
+		{`{"ip":"1.2.3.4","section":"banner"}`, mcptool.CodeMissingArgument, "port"},
+		{`{"ip":"1.2.3.4","port":0,"section":"banner"}`, mcptool.CodeInvalidArguments, "port"},
+		{`{"ip":"","port":443,"section":"banner"}`, mcptool.CodeInvalidArguments, "ip"},
+		{`{"ip":"1.2.3.4","port":443,"section":""}`, mcptool.CodeInvalidArguments, "section"},
 	} {
-		if _, text, isErr := call(t, s, ToolGetService, args); !isErr || !strings.Contains(text, CodeInvalidArgument) {
-			t.Errorf("%s: %s", args, text)
-		}
+		wantArgErr(t, cl, ToolGetService, c.args, c.code, c.arg)
 	}
 }
 
@@ -313,10 +323,13 @@ func TestCountServicesFacetBounds(t *testing.T) {
 	if len(eng.gotFacets) != 2 || eng.gotFacets[0] != (engine.FacetSpec{Name: "org", N: 5}) || eng.gotFacets[1].N != engine.DefaultFacetValues {
 		t.Errorf("facets = %+v", eng.gotFacets)
 	}
-	for _, args := range []string{`{"query":"port:22","facets":["ip:101"]}`, `{"query":""}`, `{"facets":["ip"]}`} {
-		if _, text, isErr := call(t, s, ToolCountServices, args); !isErr || !strings.Contains(text, CodeInvalidArgument) {
-			t.Errorf("%s: %s", args, text)
-		}
+	cl := open(t, s)
+	for _, c := range []struct{ args, code, arg string }{
+		{`{"query":"port:22","facets":["ip:101"]}`, mcptool.CodeInvalidArguments, "facets"},
+		{`{"query":""}`, mcptool.CodeInvalidArguments, "query"},
+		{`{"facets":["ip"]}`, mcptool.CodeMissingArgument, "query"},
+	} {
+		wantArgErr(t, cl, ToolCountServices, c.args, c.code, c.arg)
 	}
 }
 
@@ -325,9 +338,7 @@ func TestGetQuota(t *testing.T) {
 	if isErr || m["plan_name"] != "Membership" {
 		t.Errorf("quota: %s", text)
 	}
-	if _, _, isErr := call(t, lookupServer(t, &fakeEngine{}), ToolGetQuota, `{"verbose":true}`); !isErr {
-		t.Error("an undeclared argument was accepted")
-	}
+	wantArgErr(t, open(t, lookupServer(t, &fakeEngine{})), ToolGetQuota, `{"verbose":true}`, mcptool.CodeInvalidArguments, "verbose")
 }
 
 func toStrings(v any) []string {
@@ -361,27 +372,34 @@ func TestGetHistoryArguments(t *testing.T) {
 	if _, text, isErr := call(t, s, ToolGetHistory, `{"ip":"1.2.3.4","port":443}`); isErr || eng.gotHistory.Limit != mcpDefaultList {
 		t.Errorf("default observation limit %d (%s)", eng.gotHistory.Limit, text)
 	}
-	for _, args := range []string{`{}`, `{"ip":"1.2.3.4","limit":5}`, `{"ip":"1.2.3.4","port":443,"limit":51}`, `{"ip":"1.2.3.4","transport":"tcp"}`} {
-		if _, text, isErr := call(t, s, ToolGetHistory, args); !isErr || !strings.Contains(text, CodeInvalidArgument) {
-			t.Errorf("%s: %s", args, text)
-		}
+	cl := open(t, s)
+	for _, c := range []struct{ args, code, arg string }{
+		{`{}`, mcptool.CodeMissingArgument, "ip"},
+		{`{"ip":"1.2.3.4","limit":5}`, mcptool.CodeInvalidArguments, "limit"},
+		{`{"ip":"1.2.3.4","port":443,"limit":51}`, mcptool.CodeInvalidArguments, "limit"},
+		{`{"ip":"1.2.3.4","transport":"tcp"}`, mcptool.CodeInvalidArguments, "transport"},
+		{`{"ip":"1.2.3.4","offset":3}`, mcptool.CodeInvalidArguments, "offset"},
+	} {
+		wantArgErr(t, cl, ToolGetHistory, c.args, c.code, c.arg)
 	}
 }
 
 // The independent verification of b30dde9 (M1): with the defaults, fifty
 // services carrying HTTP and TLS and 400-character titles were measured under
-// the soft budget unindented and withheld whole at the indented ceiling.
+// the soft budget one way and withheld whole at a ceiling that measured
+// another. Thinning and the ceiling both measure what is sent (wire,
+// ADR-0002).
 func TestTheBudgetIsMeasuredAsTheCeilingMeasuresIt(t *testing.T) {
-	eng := &fakeEngine{services: 50, bannerSize: 600, rich: 900, vulns: 25}
+	eng := &fakeEngine{services: 80, bannerSize: 600, rich: 900, vulns: 25}
 	s := lookupServer(t, eng)
-	s.Cfg.DefaultServices, s.Cfg.DefaultVulns, s.Cfg.BannerBytes = 50, 25, 512
-	// The premise: unthinned and indented, this host is over the ceiling.
+	s.Cfg.DefaultServices, s.Cfg.DefaultVulns, s.Cfg.BannerBytes = 80, 25, 512
+	// The premise: unthinned and as sent, this host is over the ceiling.
 	h, _ := eng.LookupHost(context.Background(), "1.2.3.4", false)
 	for i := range h.Services {
 		h.Services[i].Banner, _ = clipEscaped(h.Services[i].Banner, 512)
 	}
-	if b, _ := json.MarshalIndent(h, "", "  "); len(b) <= maxResultBytes {
-		t.Fatalf("the fixture is only %d bytes indented; it no longer tests the ceiling", len(b))
+	if b, _ := wire(h); len(b) <= maxResultBytes {
+		t.Fatalf("the fixture is only %d bytes as sent; it no longer tests the ceiling", len(b))
 	}
 	m, text, isErr := call(t, s, ToolLookupHost, `{"ip":"1.2.3.4"}`)
 	if isErr {
@@ -392,7 +410,7 @@ func TestTheBudgetIsMeasuredAsTheCeilingMeasuresIt(t *testing.T) {
 	}
 	kept := len(m["services"].([]any))
 	om, _ := m["omitted"].(map[string]any)
-	if kept == 50 || kept+int(om["services"].(float64)) != 50 {
+	if kept == 80 || kept+int(om["services"].(float64)) != 80 {
 		t.Errorf("kept %d, omitted %v", kept, om)
 	}
 }
@@ -423,10 +441,7 @@ func TestOneHugeTitleCostsNoServices(t *testing.T) {
 
 // (L3) ports and ports_only contradict each other.
 func TestPortsAndPortsOnlyAreRefusedTogether(t *testing.T) {
-	_, text, isErr := call(t, lookupServer(t, &fakeEngine{services: 2}), ToolLookupHost, `{"ip":"1.2.3.4","ports":[1000],"ports_only":true}`)
-	if !isErr || !strings.Contains(text, CodeInvalidArgument) {
-		t.Errorf("accepted: %s", text)
-	}
+	wantArgErr(t, open(t, lookupServer(t, &fakeEngine{services: 2})), ToolLookupHost, `{"ip":"1.2.3.4","ports":[1000],"ports_only":true}`, mcptool.CodeInvalidArguments, "ports_only")
 }
 
 // A history of hundreds of ports is thinned and counted, not withheld.
@@ -466,18 +481,21 @@ func TestSearchServicesPassesThroughAndCountsThinning(t *testing.T) {
 
 func TestSearchServicesArguments(t *testing.T) {
 	s := lookupServer(t, &fakeEngine{rows: 1})
-	for _, args := range []string{`{}`, `{"query":""}`, `{"query":"port:1","facets":["ip:101"]}`, `{"query":"port:1","limit":5}`} {
-		if _, text, isErr := call(t, s, ToolSearchServices, args); !isErr || !strings.Contains(text, CodeInvalidArgument) {
-			t.Errorf("%s: %s", args, text)
-		}
+	cl := open(t, s)
+	for _, c := range []struct{ args, code, arg string }{
+		{`{}`, mcptool.CodeMissingArgument, "query"},
+		{`{"query":""}`, mcptool.CodeInvalidArguments, "query"},
+		{`{"query":"port:1","facets":["ip:101"]}`, mcptool.CodeInvalidArguments, "facets"},
+		{`{"query":"port:1","limit":5}`, mcptool.CodeInvalidArguments, "limit"},
+	} {
+		wantArgErr(t, cl, ToolSearchServices, c.args, c.code, c.arg)
 	}
 	m, text, isErr := call(t, s, ToolParseQuery, `{"query":"port:443"}`)
 	if isErr || m["predicted_credits_page_1"] != 1.0 {
 		t.Errorf("parse_query: %s", text)
 	}
-	if _, _, isErr := call(t, s, ToolParseQuery, `{}`); !isErr {
-		t.Error("parse_query without a query was accepted")
-	}
+	wantArgErr(t, cl, ToolParseQuery, `{}`, mcptool.CodeMissingArgument, "query")
+	wantArgErr(t, cl, ToolParseQuery, `{"query":""}`, mcptool.CodeInvalidArguments, "query")
 }
 
 func TestCreditCodesPassThrough(t *testing.T) {
@@ -505,8 +523,6 @@ func TestLargeFacetsAreThinnedNotWithheld(t *testing.T) {
 	if om["facet_values"] == nil {
 		t.Errorf("thinned facet values are not counted: %v", m["omitted"])
 	}
-	if _, text, isErr := call(t, lookupServer(t, &fakeEngine{rows: 1}), ToolSearchServices,
-		`{"query":"port:443","facets":["a","b","c","d","e","f"]}`); !isErr || !strings.Contains(text, CodeInvalidArgument) {
-		t.Errorf("six facets were accepted: %.200s", text)
-	}
+	wantArgErr(t, open(t, lookupServer(t, &fakeEngine{rows: 1})), ToolSearchServices,
+		`{"query":"port:443","facets":["a","b","c","d","e","f"]}`, mcptool.CodeInvalidArguments, "facets")
 }

@@ -18,8 +18,10 @@ spaces and tabs only.
 Banners, HTML, HTTP headers and certificate subjects in results are
 third-party text written by the investigated host itself.
 
-Arguments are decoded strictly: an argument a tool does not declare is an
-`invalid_argument` error naming it, never ignored.
+Arguments are decoded strictly: an argument a tool does not declare, or one
+of the wrong type, is an `invalid_arguments` error naming it in
+`details.argument`, never ignored; a required argument that is absent or
+`null` is `missing_argument`.
 
 Shodan's data is attributed to Shodan: its terms (§6.7) ask that Shodan
 information included in your own materials — an incident report — be
@@ -269,7 +271,8 @@ This manual. Takes no arguments.
 ## Errors
 
 Every tool error is a result with `isError: true` whose text is
-`{"code": ..., "message": ...}`. Branch on `code`; the message is for people.
+`{"code": ..., "message": ..., "details": ...}` (`details` only when there are
+any). Branch on `code`; the message is for people.
 
 **A failed `search_services` may already have been charged.** When its
 message says credits were spent, retrying spends again — whatever the table
@@ -280,7 +283,8 @@ says.
 
 | code | meaning | what to do |
 |---|---|---|
-| `invalid_argument` | an argument is missing, malformed, out of range, or not declared by the tool; or an address or query was refused before sending (internal address, unknown filter or facet name, unbalanced quote) | fix the call; the message names what was refused |
+| `invalid_arguments` | an argument is malformed, of the wrong type, empty, out of range, combined with one it contradicts, or not declared by the tool; or an address or query was refused before sending (internal address, unknown filter or facet name, unbalanced quote). `details.argument` names the argument | fix that argument; the message says what was refused |
+| `missing_argument` | a required argument is absent or `null`; `details.argument` names it | pass it |
 | `not_indexed` | Shodan has not observed the IP: its record was absent and a count for `ip:<address>` confirmed zero services | an answer, not a failure — but not evidence that nothing is open; Shodan's crawl is not exhaustive |
 | `not_observed` | the host is indexed, but Shodan has no banner for that port (and transport) | an answer — not evidence that the port is closed; the message lists the ports Shodan did observe |
 | `plan_restricted` | the query uses `vuln` or `tag`, which Shodan withholds from a Membership plan; refused before sending because the restriction does not come back as an error, only as a misleadingly low count | rephrase without that filter or facet (for CVEs, look the host up and read its inferred CVEs) |
@@ -294,6 +298,6 @@ says.
 | `upstream_error` | Shodan failed or answered with something that is not an answer (5xx, an unmapped status, a body over 32 MiB) — including a host Shodan holds services for but would not return | retry later; if it persists, it is upstream's. It is never a negative answer |
 | `network_error` | Shodan could not be reached | check connectivity, then retry |
 | `timeout` | the exchange did not finish in time, or was cancelled | retry; the operator can raise `timeout_seconds` |
-| `decode_error` | Shodan answered success with a body this tool cannot read as a whole: not a JSON object, a host record whose services are not a list, a search answer whose matches are not a list, a search or count without a numeric total. Also from `get_service` when the record holds a service this tool could not identify (its port or transport, or the service itself, missing or unreadable) that may be the one asked for — its port is unknown, or it is this port with its transport unknown — so it is not `not_observed`. A left-out service whose known port or transport rules it out does not stop `not_observed`, and one on the port asked without a transport makes the port ambiguous (`invalid_argument`: pass transport). A value of an unexpected type inside a readable body is left out and named in `notes`, not an error | retry once; if it persists, the API has changed; the CLI's `--raw` shows the document |
+| `decode_error` | Shodan answered success with a body this tool cannot read as a whole: not a JSON object, a host record whose services are not a list, a search answer whose matches are not a list, a search or count without a numeric total. Also from `get_service` when the record holds a service this tool could not identify (its port or transport, or the service itself, missing or unreadable) that may be the one asked for — its port is unknown, or it is this port with its transport unknown — so it is not `not_observed`. A left-out service whose known port or transport rules it out does not stop `not_observed`, and one on the port asked without a transport makes the port ambiguous (`invalid_arguments`: pass transport). A value of an unexpected type inside a readable body is left out and named in `notes`, not an error | retry once; if it persists, the API has changed; the CLI's `--raw` shows the document |
 | `response_too_large` | the result crossed the server's 128 KB ceiling and was withheld whole | ask for less: fewer ports, a smaller limit, or one section at a time |
 | `internal_error` | a failure nothing classified | report it; retrying the same call is unlikely to help |

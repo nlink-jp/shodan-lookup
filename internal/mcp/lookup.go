@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -43,30 +42,26 @@ type lookupArgs struct {
 	Refresh   bool   `json:"refresh"`
 }
 
-func (s *Server) lookupHost(ctx context.Context, raw json.RawMessage) (any, error) {
-	var a lookupArgs
-	if err := decodeArgs(raw, &a); err != nil {
-		return nil, err
-	}
+func (s *Server) lookupHost(ctx context.Context, a lookupArgs) (any, error) {
 	if a.IP == "" {
-		return nil, invalidArg("ip is required")
+		return nil, invalidArg("ip", "ip is required")
 	}
 	if a.PortsOnly && len(a.Ports) > 0 {
-		return nil, invalidArg("ports and ports_only do not combine: ports_only lists no services")
+		return nil, invalidArg("ports_only", "ports and ports_only do not combine: ports_only lists no services")
 	}
 	if len(a.Ports) > mcpMaxPorts {
-		return nil, invalidArg(fmt.Sprintf("ports lists at most %d ports", mcpMaxPorts))
+		return nil, invalidArg("ports", fmt.Sprintf("ports lists at most %d ports", mcpMaxPorts))
 	}
 	for _, p := range a.Ports {
 		if p < 1 || p > 65535 {
-			return nil, invalidArg(fmt.Sprintf("port %d is not between 1 and 65535", p))
+			return nil, invalidArg("ports", fmt.Sprintf("port %d is not between 1 and 65535", p))
 		}
 	}
 	h, err := s.Eng.LookupHost(ctx, a.IP, a.Refresh)
 	if err != nil {
-		return nil, err
+		return nil, toolError(err)
 	}
-	return s.compact(h, a.Ports, a.PortsOnly), nil
+	return withinCeiling(s.compact(h, a.Ports, a.PortsOnly))
 }
 
 func (s *Server) compact(h *engine.Host, ports []int, portsOnly bool) *compactHost {
@@ -137,7 +132,7 @@ func (s *Server) compact(h *engine.Host, ports []int, portsOnly bool) *compactHo
 	}
 
 	// Last resort before the ceiling: drop services from the end, then CVEs,
-	// counted. The size is measured as the ceiling measures it — indented,
+	// counted. The size is measured as the ceiling measures it — as sent,
 	// after the 1000-character backstop — or the thinning would run against a
 	// different number from the one that withholds the result.
 	capStrings(out)
@@ -154,10 +149,10 @@ func (s *Server) compact(h *engine.Host, ports []int, portsOnly bool) *compactHo
 	return finish(out)
 }
 
-// over reports whether v, encoded as toolText encodes it, passes the soft
+// over reports whether v, encoded as it is sent (wire), passes the soft
 // budget.
 func over(v any) bool {
-	b, err := json.MarshalIndent(v, "", "  ")
+	b, err := wire(v)
 	return err == nil && len(b) > softBudget
 }
 
@@ -178,7 +173,8 @@ func finish(out *compactHost) *compactHost {
 
 // clipEscaped shortens s so that its JSON-escaped form fits in max bytes,
 // cutting on a character boundary. Escaping is what the client pays for: a
-// banner of control characters is six bytes per character on the wire.
+// banner of control characters is six bytes per character on the wire. HTML
+// characters are not escaped (wire), so < > & are one byte each.
 func clipEscaped(s string, max int) (string, bool) {
 	if max <= 0 || escapedLen(s) <= max {
 		return s, false
@@ -207,7 +203,7 @@ func escapedRuneLen(r rune) int {
 	switch {
 	case r == '"' || r == '\\' || r == '\n' || r == '\r' || r == '\t':
 		return 2
-	case r < 0x20 || r == '<' || r == '>' || r == '&' || r == 0x2028 || r == 0x2029:
+	case r < 0x20 || r == 0x2028 || r == 0x2029:
 		return 6
 	case r == utf8.RuneError:
 		return 6
@@ -228,13 +224,14 @@ type serviceArgs struct {
 
 var textSections = map[string]bool{engine.SectionBanner: true, engine.SectionHTML: true, engine.SectionCert: true}
 
-func (s *Server) getService(ctx context.Context, raw json.RawMessage) (any, error) {
-	var a serviceArgs
-	if err := decodeArgs(raw, &a); err != nil {
-		return nil, err
-	}
-	if a.IP == "" || a.Section == "" || a.Port == 0 {
-		return nil, invalidArg("ip, port and section are required")
+func (s *Server) getService(ctx context.Context, a serviceArgs) (any, error) {
+	switch {
+	case a.IP == "":
+		return nil, invalidArg("ip", "ip is required")
+	case a.Port == 0:
+		return nil, invalidArg("port", "port is required (1-65535)")
+	case a.Section == "":
+		return nil, invalidArg("section", "section is required")
 	}
 	limit := 0
 	if a.Limit != nil {
@@ -244,13 +241,13 @@ func (s *Server) getService(ctx context.Context, raw json.RawMessage) (any, erro
 			max = mcpMaxTextLimit
 		}
 		if limit < 1 || limit > max {
-			return nil, invalidArg(fmt.Sprintf("limit for section %s must be between 1 and %d", a.Section, max))
+			return nil, invalidArg("limit", fmt.Sprintf("limit for section %s must be between 1 and %d", a.Section, max))
 		}
 	} else if !textSections[a.Section] {
 		limit = mcpDefaultList
 	}
-	return s.Eng.GetService(ctx, engine.ServiceQuery{IP: a.IP, Port: a.Port, Transport: a.Transport,
-		Section: a.Section, Offset: a.Offset, Limit: limit}, a.Refresh)
+	return answer(s.Eng.GetService(ctx, engine.ServiceQuery{IP: a.IP, Port: a.Port, Transport: a.Transport,
+		Section: a.Section, Offset: a.Offset, Limit: limit}, a.Refresh))
 }
 
 type countArgs struct {
@@ -259,21 +256,17 @@ type countArgs struct {
 	Refresh bool     `json:"refresh"`
 }
 
-func (s *Server) countServices(ctx context.Context, raw json.RawMessage) (any, error) {
-	var a countArgs
-	if err := decodeArgs(raw, &a); err != nil {
-		return nil, err
-	}
+func (s *Server) countServices(ctx context.Context, a countArgs) (any, error) {
 	if strings.TrimSpace(a.Query) == "" {
-		return nil, invalidArg("query is required")
+		return nil, invalidArg("query", "query is required")
 	}
 	specs, err := parseFacets(a.Facets)
 	if err != nil {
-		return nil, err
+		return nil, toolError(err)
 	}
 	res, err := s.Eng.CountServices(ctx, a.Query, specs, a.Refresh)
 	if err != nil {
-		return nil, err
+		return nil, toolError(err)
 	}
 	out := &compactCount{Count: res, Omitted: map[string]int{}}
 	capStrings(out)
@@ -283,7 +276,7 @@ func (s *Server) countServices(ctx context.Context, raw json.RawMessage) (any, e
 	} else {
 		out.Omitted = nil
 	}
-	return out, nil
+	return withinCeiling(out)
 }
 
 // compactCount is count_services' answer, with facet values thinned to fit.
@@ -312,8 +305,6 @@ func thinFacets(out any, facets []engine.Facet, omitted map[string]int) {
 	}
 }
 
-func invalidArg(msg string) error { return &argError{code: CodeInvalidArgument, msg: msg} }
-
 // mcpMaxVariants is how many variants get_history lists per port; the rest
 // are counted.
 const mcpMaxVariants = 20
@@ -334,27 +325,31 @@ type historyArgs struct {
 	Refresh   bool   `json:"refresh"`
 }
 
-func (s *Server) getHistory(ctx context.Context, raw json.RawMessage) (any, error) {
-	var a historyArgs
-	if err := decodeArgs(raw, &a); err != nil {
-		return nil, err
-	}
+func (s *Server) getHistory(ctx context.Context, a historyArgs) (any, error) {
 	if a.IP == "" {
-		return nil, invalidArg("ip is required")
+		return nil, invalidArg("ip", "ip is required")
 	}
 	limit := mcpDefaultList
 	if a.Limit != nil {
 		if *a.Limit < 1 || *a.Limit > mcpMaxListLimit {
-			return nil, invalidArg(fmt.Sprintf("limit must be between 1 and %d", mcpMaxListLimit))
+			return nil, invalidArg("limit", fmt.Sprintf("limit must be between 1 and %d", mcpMaxListLimit))
 		}
 		limit = *a.Limit
 	}
-	if a.Port == 0 && (a.Transport != "" || a.Offset != 0 || a.Limit != nil) {
-		return nil, invalidArg("transport, offset and limit apply to one port's observations; pass port")
+	if a.Port == 0 {
+		// Named by the first of them given: it is the one that needs port.
+		for _, given := range []struct {
+			name string
+			set  bool
+		}{{"transport", a.Transport != ""}, {"offset", a.Offset != 0}, {"limit", a.Limit != nil}} {
+			if given.set {
+				return nil, invalidArg(given.name, "transport, offset and limit apply to one port's observations; pass port")
+			}
+		}
 	}
 	h, err := s.Eng.GetHistory(ctx, engine.HistoryQuery{IP: a.IP, Port: a.Port, Transport: a.Transport, Offset: a.Offset, Limit: limit}, a.Refresh)
 	if err != nil {
-		return nil, err
+		return nil, toolError(err)
 	}
 	out := &compactHistory{History: h}
 	dropped := 0
@@ -396,7 +391,7 @@ func (s *Server) getHistory(ctx context.Context, raw json.RawMessage) (any, erro
 			h.Notes = append(h.Notes, "not every port is listed; pass port for one of them")
 		}
 	}
-	return out, nil
+	return withinCeiling(out)
 }
 
 // compactSearch is search_services' answer: the engine's page with rows
@@ -413,21 +408,17 @@ type searchArgs struct {
 	Refresh bool     `json:"refresh"`
 }
 
-func (s *Server) searchServices(ctx context.Context, raw json.RawMessage) (any, error) {
-	var a searchArgs
-	if err := decodeArgs(raw, &a); err != nil {
-		return nil, err
-	}
+func (s *Server) searchServices(ctx context.Context, a searchArgs) (any, error) {
 	if strings.TrimSpace(a.Query) == "" {
-		return nil, invalidArg("query is required")
+		return nil, invalidArg("query", "query is required")
 	}
 	specs, err := parseFacets(a.Facets)
 	if err != nil {
-		return nil, err
+		return nil, toolError(err)
 	}
 	res, err := s.Eng.SearchServices(ctx, engine.SearchQuery{Query: a.Query, Facets: specs, Page: a.Page}, a.Refresh)
 	if err != nil {
-		return nil, err
+		return nil, toolError(err)
 	}
 	// The credits are spent by now: the answer must fit, never be withheld.
 	// Facet values go first (their tails are the least informative), then
@@ -445,13 +436,13 @@ func (s *Server) searchServices(ctx context.Context, raw json.RawMessage) (any, 
 	} else {
 		out.Omitted = nil
 	}
-	return out, nil
+	return withinCeiling(out)
 }
 
 // parseFacets reads MCP facet specs, held to the MCP bound.
 func parseFacets(in []string) ([]engine.FacetSpec, error) {
 	if len(in) > mcpMaxFacets {
-		return nil, invalidArg(fmt.Sprintf("at most %d facets per call here (the CLI takes more)", mcpMaxFacets))
+		return nil, invalidArg("facets", fmt.Sprintf("at most %d facets per call here (the CLI takes more)", mcpMaxFacets))
 	}
 	specs := make([]engine.FacetSpec, 0, len(in))
 	for _, f := range in {
@@ -460,7 +451,7 @@ func parseFacets(in []string) ([]engine.FacetSpec, error) {
 			return nil, err
 		}
 		if spec.N > mcpMaxFacetN {
-			return nil, invalidArg(fmt.Sprintf("facet %q: at most %d values per facet here (the CLI allows %d)", f, mcpMaxFacetN, engine.MaxFacetValues))
+			return nil, invalidArg("facets", fmt.Sprintf("facet %q: at most %d values per facet here (the CLI allows %d)", f, mcpMaxFacetN, engine.MaxFacetValues))
 		}
 		specs = append(specs, spec)
 	}

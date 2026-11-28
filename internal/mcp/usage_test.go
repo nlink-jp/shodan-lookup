@@ -9,6 +9,10 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/nlink-jp/mcptool"
+
+	"github.com/nlink-jp/shodan-lookup/internal/engine"
 )
 
 // The manual is what an agent reads before its first call, so it is pinned to
@@ -124,14 +128,32 @@ func TestManualDocumentsEveryTool(t *testing.T) {
 	}
 }
 
+// readAs is every code this server answers with under another name: the
+// engine's invalid_argument stays the CLI's, and is mcptool's
+// invalid_arguments over MCP (toolError, ADR-0002).
+var readAs = map[string]string{engine.CodeInvalidArgument: mcptool.CodeInvalidArguments}
+
 func TestManualDocumentsEveryErrorCode(t *testing.T) {
 	codes := declaredConstants(t, "Code", codePackages(t)...)
 	if len(codes) == 0 {
 		t.Fatal("found no Code* constants — the collector is broken")
 	}
+	row := func(code string) bool { return strings.Contains(UsageDoc(), "| `"+code+"` |") }
 	for constName, code := range codes {
-		if !strings.Contains(UsageDoc(), "| `"+code+"` |") {
+		if as, ok := readAs[code]; ok {
+			if row(code) {
+				t.Errorf("%s (%q) has a row, but the MCP server answers it as %q", constName, code, as)
+			}
+			code = as
+		}
+		if !row(code) {
 			t.Errorf("%s (%q) has no row in the usage.md error table", constName, code)
+		}
+	}
+	// mcptool's own codes reach the agent too.
+	for _, code := range []string{mcptool.CodeInvalidArguments, mcptool.CodeMissingArgument, mcptool.CodeInternal} {
+		if !row(code) {
+			t.Errorf("mcptool's %q has no row in the usage.md error table", code)
 		}
 	}
 }

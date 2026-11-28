@@ -1,2 +1,4 @@
-github.com/nlink-jp/mcp v0.3.0 h1:BliCB8vjeLLhlkk3KlxpnUYAvqsrbcKM8Khekfz7MmI=
-github.com/nlink-jp/mcp v0.3.0/go.mod h1:zZMrI0OhABn3R2K2ISiSuo1hf2nkyJSdqrVYB/mk0M8=
+github.com/nlink-jp/mcp v0.4.0 h1:b+93iY1DHt5k7+N6Hh7yu9rGJx8c5kbxT5aJHcOMy8c=
+github.com/nlink-jp/mcp v0.4.0/go.mod h1:zZMrI0OhABn3R2K2ISiSuo1hf2nkyJSdqrVYB/mk0M8=
+github.com/nlink-jp/mcptool v0.1.3 h1:Ua4glGCXzZI4y7SsOLDHK5Arq+xTmXMPA3PBagVHw5s=
+github.com/nlink-jp/mcptool v0.1.3/go.mod h1:/aTYS6gt1etqX63wKWBh/9g0Qomiexx9E+Pj+7xYO2A=

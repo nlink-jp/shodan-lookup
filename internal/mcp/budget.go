@@ -1,11 +1,52 @@
 package mcp
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"sort"
 	"strings"
+
+	"github.com/nlink-jp/mcptool"
 )
+
+// maxResultBytes is the ceiling no tool result may cross, whatever a field
+// turns out to hold. Every known large part gets its own cap and its own way to
+// be read in full as the lookup tools land; this is for the part nobody thought
+// of. One measured Shodan host record was 991 KB before projection.
+const maxResultBytes = 128 << 10
+
+// wire encodes v as mcptool writes a tool result's JSON (its internal jsonw):
+// on one line, HTML characters not escaped, no trailing newline. Every budget
+// here measures this encoding, so what is measured is what a client receives
+// (ADR-0002).
+func wire(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+}
+
+// withinCeiling holds v to the backstops: every ungoverned string to
+// fieldClip characters, then the whole to maxResultBytes. A result over the
+// ceiling is withheld whole rather than cut at an arbitrary byte. One under it
+// is returned as the very bytes measured.
+func withinCeiling(v any) (any, error) {
+	v, _ = capStrings(v)
+	b, err := wire(v)
+	if err != nil {
+		return nil, mcptool.NewError(mcptool.CodeInternal, "the result could not be encoded")
+	}
+	if len(b) > maxResultBytes {
+		return nil, mcptool.Errorf(CodeTooLarge,
+			"the result is %d bytes, over this server's ceiling of %d; ask for less — fewer ports, or one section at a time", len(b), maxResultBytes)
+	}
+	return mcptool.Text(string(b)), nil
+}
 
 // Vendored from cve-lookup (its correction 23). Every large part of a result
 // that was measured gets a cap of its own and a way to be read in full. Those

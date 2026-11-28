@@ -4,18 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/nlink-jp/mcp"
 	"github.com/nlink-jp/mcp/client"
-	"github.com/nlink-jp/mcp/probe"
+	"github.com/nlink-jp/mcptool"
+	"github.com/nlink-jp/mcptool/tooltest"
 
 	"github.com/nlink-jp/shodan-lookup/internal/cache"
-	"github.com/nlink-jp/shodan-lookup/internal/engine"
 	"github.com/nlink-jp/shodan-lookup/internal/config"
+	"github.com/nlink-jp/shodan-lookup/internal/engine"
 )
 
 func testServer(t *testing.T) *Server {
@@ -31,57 +30,30 @@ func testServer(t *testing.T) *Server {
 	}
 }
 
+// build returns a function that serves s, for mcptool's tooltest (a server is
+// served once, so each open builds a fresh one over the same tools).
+func build(s *Server) tooltest.NewServer {
+	return func(t testing.TB) *mcptool.Server {
+		t.Helper()
+		ms, err := s.Build()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ms
+	}
+}
+
 // open serves s over pipes and opens it with nlink-jp/mcp's client, the way a
-// dual-era MCP client does (server-migration §6). Nothing here writes the
-// handshake by hand.
+// dual-era MCP client does. Nothing here writes the handshake by hand.
 func open(t *testing.T, s *Server) *client.Client {
 	t.Helper()
-	return openWith(t, s, client.Options{})
+	return tooltest.Open(t, build(s))
 }
 
 // openWith is open with the client's options (CancelNotice, say).
 func openWith(t *testing.T, s *Server, opts client.Options) *client.Client {
 	t.Helper()
-	inR, inW := io.Pipe()
-	outR, outW := io.Pipe()
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() {
-		done <- s.Serve(ctx, inR, outW)
-		_ = outW.Close()
-	}()
-	kill := func() { cancel(); _ = inW.Close(); _ = outR.Close() }
-	conn, err := client.NewLineConn(outR, inW, kill, client.LineOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Registered before Open, so a failed open leaves no goroutine or pipe.
-	var cl *client.Client
-	t.Cleanup(func() {
-		if cl == nil {
-			kill()
-			return
-		}
-		_ = cl.Close()
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Errorf("Serve: %v", err)
-			}
-		case <-time.After(5 * time.Second):
-			t.Error("Serve did not return after the client closed")
-		}
-		kill()
-	})
-	octx, ocancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer ocancel()
-	opts.Client = mcp.Implementation{Name: "test", Version: "0"}
-	c, err := client.Open(octx, conn, opts)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	cl = c
-	return cl
+	return tooltest.OpenWith(t, build(s), opts)
 }
 
 // callTool runs one tool. args is the arguments' JSON, or "" for none. It
@@ -114,32 +86,47 @@ func callErr(cl *client.Client, tool, args string) (*client.ToolResult, error) {
 	return cl.CallTool(ctx, tool, a, nil)
 }
 
-// ADR-030 §7: the server against the three probe clients — legacy only,
-// dual-era, modern only — with the outcomes the specification's
-// compatibility matrix gives for a dual-era server.
-func TestAgainstTheProbeClients(t *testing.T) {
-	for _, kind := range []probe.ClientKind{probe.ClientLegacyOnly, probe.ClientDual, probe.ClientModernOnly} {
-		s := testServer(t)
-		inR, inW := io.Pipe()
-		outR, outW := io.Pipe()
-		ctx, cancel := context.WithCancel(context.Background())
-		done := make(chan struct{})
-		go func() { _ = s.Serve(ctx, inR, outW); _ = outW.Close(); close(done) }()
-		r := probe.Run(ctx, kind, outR, inW, probe.ClientOptions{StepTimeout: 2 * time.Second})
-		cancel()
-		_ = inW.Close()
-		_ = outR.Close()
-		<-done
-		if want := probe.Expect(kind, probe.ServerDual); r.Outcome != want || len(r.Violations) != 0 || len(r.Warnings) != 0 {
-			t.Errorf("%v probe client: outcome %s (want %s), violations %v, warnings %v, error %s",
-				kind, r.Outcome, want, r.Violations, r.Warnings, r.Error)
-		}
+// toolErr runs one tool that must fail and returns its structured error.
+func toolErr(t *testing.T, cl *client.Client, tool, args string) *mcptool.Error {
+	t.Helper()
+	res, err := callErr(cl, tool, args)
+	if err != nil {
+		t.Fatalf("%s: %v", tool, err)
+	}
+	e, ok := tooltest.ToolError(res)
+	if !ok {
+		t.Fatalf("%s %s: not a structured tool error: %+v", tool, args, res)
+	}
+	return e
+}
+
+// wantArgErr runs one call that must be refused for the argument arg, with
+// code. Codes are compared whole: invalid_arguments contains the CLI's
+// invalid_argument, so a substring test would pass either.
+func wantArgErr(t *testing.T, cl *client.Client, tool, args, code, arg string) {
+	t.Helper()
+	e := toolErr(t, cl, tool, args)
+	if e.Code != code || e.Details["argument"] != arg {
+		t.Errorf("%s %s: code %q, details %v (%s); want %q naming %q", tool, args, e.Code, e.Details, e.Message, code, arg)
 	}
 }
 
-func TestServeRefusesANilInput(t *testing.T) {
-	if err := testServer(t).Serve(context.Background(), nil, io.Discard); err == nil {
-		t.Error("Serve accepted a nil stdin")
+// ADR-030 §7: the server against the three probe clients.
+func TestAgainstTheProbeClients(t *testing.T) {
+	tooltest.ProbeMatrix(t, build(testServer(t)))
+}
+
+// ADR-021 §10: no tool returns a path that needs work_dir, and no schema or
+// description holds a retired spelling. (Closed schemas, and schemas naming
+// exactly their argument structs, are checked when the tools are registered.)
+func TestTheSchemaContract(t *testing.T) {
+	ms, err := testServer(t).Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tooltest.SchemaContract(t, ms, tooltest.Contract{})
+	if len(ms.Tools()) != len(toolDefinitions()) {
+		t.Errorf("registered %d tools of %d", len(ms.Tools()), len(toolDefinitions()))
 	}
 }
 
@@ -190,19 +177,14 @@ func TestToolTextCarriesNoDefensiveImperatives(t *testing.T) {
 // that takes none. A schema-checking client would never send this; the
 // module's client sends what it is given.
 func TestUndeclaredArgumentsAreRefused(t *testing.T) {
-	text, result := callTool(t, open(t, testServer(t)), "cache_status", `{"verbose":true}`)
-	if !result.IsError {
-		t.Fatalf("an undeclared argument was accepted: %s", text)
-	}
-	var payload map[string]string
-	if err := json.Unmarshal([]byte(text), &payload); err != nil {
-		t.Fatalf("tool error is not structured JSON: %s", text)
-	}
-	if payload["code"] != CodeInvalidArgument {
-		t.Errorf("code = %q, want %q", payload["code"], CodeInvalidArgument)
-	}
-	if !strings.Contains(payload["message"], "verbose") {
-		t.Errorf("the message does not name the argument: %q", payload["message"])
+	cl := open(t, testServer(t))
+	for tool, args := range map[string]string{
+		ToolCacheStatus: `{"verbose":true}`,
+		ToolGetQuota:    `{"verbose":true}`,
+		ToolGetUsage:    `{"verbose":true}`,
+		ToolLookupHost:  `{"ip":"192.0.2.1","verbose":true}`,
+	} {
+		wantArgErr(t, cl, tool, args, mcptool.CodeInvalidArguments, "verbose")
 	}
 }
 
@@ -265,36 +247,44 @@ func TestCacheStatusReportsEveryTTL(t *testing.T) {
 	}
 }
 
-// An unknown tool never reaches a handler: the protocol layer refuses it with
-// -32602 (server-migration §4), so it is not a tool result any more.
-func TestUnknownToolIsAProtocolError(t *testing.T) {
-	_, err := callErr(open(t, testServer(t)), "no_such_tool", "")
-	var e *mcp.Error
-	if !errors.As(err, &e) || e.Code != -32602 {
-		t.Errorf("err = %v, want -32602", err)
+// An error nothing classified must not be reported as the caller's fault;
+// the engine's codes pass through, its invalid_argument as invalid_arguments
+// naming the argument (ADR-0002).
+func TestToolErrorClassifies(t *testing.T) {
+	for _, c := range []struct {
+		err       error
+		code, arg string
+		msg       string
+	}{
+		{errors.New("disk on fire"), mcptool.CodeInternal, "", "disk on fire"},
+		{&engine.Error{Code: engine.CodeNotIndexed, Message: "not in the index"}, engine.CodeNotIndexed, "", "not in the index"},
+		{&engine.Error{Code: engine.CodeInvalidArgument, Message: "bad query", Argument: "query"}, mcptool.CodeInvalidArguments, "query", "bad query"},
+		{invalidArg("ports", "too many"), mcptool.CodeInvalidArguments, "ports", "too many"},
+	} {
+		var e *mcptool.Error
+		if !errors.As(toolError(c.err), &e) || e.Code != c.code || e.Message != c.msg {
+			t.Errorf("%v: got %+v, want %s", c.err, e, c.code)
+			continue
+		}
+		if got, _ := e.Details["argument"].(string); got != c.arg {
+			t.Errorf("%v: argument %q, want %q", c.err, got, c.arg)
+		}
 	}
 }
 
-// An error nothing classified must not be reported as the caller's fault.
-func TestUnclassifiedErrorIsInternalNotInvalidArgument(t *testing.T) {
-	got := structuredError(errors.New("disk on fire"))
-	if got["code"] != CodeInternal {
-		t.Errorf("code = %q, want %q", got["code"], CodeInternal)
-	}
-	if got["message"] != "disk on fire" {
-		t.Errorf("message = %q", got["message"])
-	}
+// An engine refusal reaches the agent as invalid_arguments, naming the
+// argument the engine said it is about.
+func TestAnEngineRefusalNamesItsArgument(t *testing.T) {
+	s := lookupServer(t, &fakeEngine{err: &engine.Error{Code: engine.CodeInvalidArgument, Message: "10.0.0.1 is a private address", Argument: "ip"}})
+	wantArgErr(t, open(t, s), ToolLookupHost, `{"ip":"10.0.0.1"}`, mcptool.CodeInvalidArguments, "ip")
 }
 
 // encoding/json matches names case-insensitively; the schema does not. An
 // argument spelt in another case is refused by name, as an undeclared one is.
 func TestAnArgumentInAnotherCaseIsRefused(t *testing.T) {
 	cl := open(t, testServer(t))
-	for _, args := range []string{`{"IP":"192.0.2.1"}`, `{"ip":"192.0.2.1","Ports":[443]}`} {
-		text, result := callTool(t, cl, "lookup_host", args)
-		if !result.IsError || !strings.Contains(text, "unknown field") {
-			t.Errorf("%s was accepted: %s", args, text)
-		}
+	for args, name := range map[string]string{`{"IP":"192.0.2.1"}`: "IP", `{"ip":"192.0.2.1","Ports":[443]}`: "Ports"} {
+		wantArgErr(t, cl, ToolLookupHost, args, mcptool.CodeInvalidArguments, name)
 	}
 }
 

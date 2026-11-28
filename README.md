@@ -193,6 +193,13 @@ and the error-recovery table. `lookup_host` answers within a response budget
 — services, banners and CVEs past the defaults are counted in `omitted`, and
 `get_service` reaches every part in full, paged.
 
+Results are JSON on one line. A tool error is a result whose text is
+`{"code", "message", "details"}`: an argument the tool does not declare, of the
+wrong type, empty or out of range is `invalid_arguments`, naming the argument
+in `details.argument`, and a required one left out is `missing_argument`. The
+CLI's codes (exit status, `--json`, stderr) do not change: there a refused
+input is `invalid_argument`.
+
 Shodan does not hold its fields to one type (measured: an AS number sent as a
 number and as a string within one record). A value of a type this tool does
 not read is left out of the answer — never turned into 0 — and named in

@@ -5,21 +5,19 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
-	"os/signal"
-	"syscall"
+
+	"github.com/nlink-jp/mcptool/serve"
 
 	"github.com/nlink-jp/shodan-lookup/internal/cache"
 	"github.com/nlink-jp/shodan-lookup/internal/config"
 	"github.com/nlink-jp/shodan-lookup/internal/mcp"
 )
 
-// notifyContext is signal.NotifyContext; a test stands in for the signal.
-var notifyContext = signal.NotifyContext
-
 // runMCP serves the stdio MCP server until stdin closes (every request that
-// arrived is answered first) or a signal arrives. SIGINT and SIGTERM cancel the
-// server's ctx, so it returns at once and its cleanup runs.
+// arrived is answered first) or a signal arrives. mcptool's serve.Run cancels
+// the server's ctx on SIGINT and SIGTERM, so it returns at once and its
+// cleanup runs (ADR-0002); a test stands in for the signal through
+// serve.NotifyContext.
 func runMCP(args []string, version string, stdin io.Reader, stdout, stderr io.Writer) int {
 	var configPath string
 	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
@@ -51,9 +49,12 @@ func runMCP(args []string, version string, stdin io.Reader, stdout, stderr io.Wr
 		Version: version,
 	}
 
-	ctx, stop := notifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if err := srv.Serve(ctx, stdin, stdout); err != nil {
+	ms, err := srv.Build()
+	if err != nil {
+		fmt.Fprintf(stderr, "shodan-lookup: mcp: %v\n", err)
+		return exitError
+	}
+	if err := serve.Run(context.Background(), ms, serve.Options{Stdin: stdin, Stdout: stdout}); err != nil {
 		fmt.Fprintf(stderr, "shodan-lookup: mcp: %v\n", err)
 		return exitError
 	}

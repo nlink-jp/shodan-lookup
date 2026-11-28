@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **The MCP tools run on the organization's tool-conventions module,
+  nlink-jp/mcptool** (ADR-0002, organization ADR-031): arguments are decoded
+  before a tool runs, and the server is run by mcptool's `serve.Run`. What an
+  MCP client sees (the CLI is unchanged):
+  - **Argument errors are `invalid_arguments`, naming the argument in
+    `details.argument`**, in place of `invalid_argument` — whether the call
+    was refused at decoding (an unknown or wrong-typed argument, now worded
+    `unknown argument "…"` / `argument "…" must be …`), by a tool (an empty
+    value, a range, a contradicting combination) or by the engine (an
+    internal address, an unknown filter or facet, a port that needs
+    `transport`). A required argument left out is `missing_argument`. The
+    `get_usage` manual's recovery table has both rows.
+  - Results are JSON on one line (no indentation), and `<`, `>` and `&` arrive
+    unescaped (a banner's `&` no longer arrives as `\u0026`). The values are
+    the same.
+  - The response budget measures the result as it is sent, so more fits:
+    fewer services, rows and facet values are thinned, fewer banners are
+    shortened, and a result the 128 KB ceiling withheld may now be returned.
+  - With several problems in one call, the first one reported may change
+    (unknown → missing → type).
+
 ## [0.2.1] - 2026-11-28
 
 ### Fixed

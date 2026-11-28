@@ -1,8 +1,14 @@
 package mcp
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/nlink-jp/mcptool"
 )
 
 // The backstop shortens any ungoverned string and names it, and never touches
@@ -37,19 +43,39 @@ func TestCapStringsShortensOnlyUngovernedText(t *testing.T) {
 }
 
 // Nothing over the ceiling leaves, whatever it holds.
-func TestToolTextWithholdsAnOversizedResult(t *testing.T) {
-	big := map[string]any{"rows": make([]string, 0)}
+func TestTheCeilingWithholdsAnOversizedResult(t *testing.T) {
 	rows := make([]string, 0, 200)
 	for i := 0; i < 200; i++ {
 		rows = append(rows, strings.Repeat("y", 900))
 	}
-	big["rows"] = rows
-	res := toolText(big)
-	if res["isError"] != true {
-		t.Fatal("a result over the ceiling was returned")
+	out, err := withinCeiling(map[string]any{"rows": rows})
+	var e *mcptool.Error
+	if out != nil || !errors.As(err, &e) || e.Code != CodeTooLarge {
+		t.Fatalf("a result over the ceiling was returned: out %v, err %v", out != nil, err)
 	}
-	content := res["content"].([]map[string]any)
-	if text, _ := content[0]["text"].(string); !strings.Contains(text, CodeTooLarge) {
-		t.Errorf("the refusal does not carry %s: %s", CodeTooLarge, text)
+}
+
+// The budget measures what is sent: one line, < > & as one byte each. A
+// result of HTML-heavy text that fits only that way is returned, as the very
+// bytes measured; measured indented or escaped, it would have been withheld.
+func TestTheCeilingMeasuresWhatIsSent(t *testing.T) {
+	rows := make([]string, 0, 160)
+	for i := 0; i < 160; i++ {
+		rows = append(rows, strings.Repeat("<&>", 270)) // 810 bytes sent, 4,860 escaped
+	}
+	v := map[string]any{"rows": rows}
+	if b, _ := json.MarshalIndent(v, "", "  "); len(b) <= maxResultBytes {
+		t.Fatalf("the fixture is %d bytes escaped and indented; it no longer tests the measure", len(b))
+	}
+	out, err := withinCeiling(v)
+	if err != nil {
+		t.Fatalf("withheld: %v", err)
+	}
+	want, _ := wire(v)
+	if !reflect.DeepEqual(out, mcptool.Text(string(want))) {
+		t.Error("the result is not the bytes measured")
+	}
+	if strings.Contains(string(want), `\u0026`) || bytes.Contains(want, []byte("\n")) {
+		t.Errorf("wire escapes HTML or is not one line: %.80s", want)
 	}
 }
