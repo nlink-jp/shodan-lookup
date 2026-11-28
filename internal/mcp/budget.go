@@ -150,8 +150,10 @@ func capValue(v reflect.Value, name string, seen map[string]bool) {
 			v.SetMapIndex(k, cp)
 		}
 	case reflect.String:
+		// fieldClip runes, the mark included: shortened once, a string is
+		// within the limit, and a second pass leaves it and its note alone.
 		if r := []rune(v.String()); len(r) > fieldClip && v.CanSet() {
-			v.SetString(string(r[:fieldClip]) + "…")
+			v.SetString(string(r[:fieldClip-1]) + "…")
 			seen[name] = true
 		}
 	}

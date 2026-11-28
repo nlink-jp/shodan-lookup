@@ -29,6 +29,13 @@ adheres to [Semantic Versioning](https://semver.org/).
   - With several problems in one call, the first one reported may change
     (unknown → missing → type).
 
+### Fixed
+
+- A field over 1000 characters was named twice in `notes` (the backstop ran
+  inside the tool and again at the ceiling, and a shortened string, at 1001
+  characters with its mark, was shortened again). It is now shortened to 1000
+  characters, the mark included, and named once.
+
 ## [0.2.1] - 2026-11-28
 
 ### Fixed

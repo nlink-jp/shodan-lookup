@@ -22,8 +22,8 @@ func TestCapStringsShortensOnlyUngovernedText(t *testing.T) {
 	}
 	got, names := capStrings(&page{Title: long, Text: long})
 	p := got.(*page)
-	if len([]rune(p.Title)) != fieldClip+1 || !strings.HasSuffix(p.Title, "…") {
-		t.Errorf("title not shortened to %d runes plus a mark: %d", fieldClip, len([]rune(p.Title)))
+	if len([]rune(p.Title)) != fieldClip || !strings.HasSuffix(p.Title, "…") {
+		t.Errorf("title not shortened to %d runes, the mark included: %d", fieldClip, len([]rune(p.Title)))
 	}
 	if p.Text != long {
 		t.Error("a section's page of text was shortened")
@@ -39,6 +39,26 @@ func TestCapStringsShortensOnlyUngovernedText(t *testing.T) {
 	mm := m.(map[string]any)
 	if mm["text"] != long || len(names) != 1 || names[0] != "banner" {
 		t.Errorf("map result: shortened %v; text kept whole = %v", names, mm["text"] == long)
+	}
+}
+
+// A result goes through the backstop twice — inside a tool, so thinning
+// measures what will be sent, and again at the ceiling. The second pass must
+// find nothing to do: a shortened string is not shortened again, and the note
+// saying so is written once.
+func TestCapStringsTwiceShortensAndNotesOnce(t *testing.T) {
+	type page struct {
+		Title string   `json:"title"`
+		Notes []string `json:"notes,omitempty"`
+	}
+	p := &page{Title: strings.Repeat("x", fieldClip+5)}
+	capStrings(p)
+	once := p.Title
+	if _, names := capStrings(p); len(names) != 0 || p.Title != once {
+		t.Errorf("the second pass shortened %v again: %d runes", names, len([]rune(p.Title)))
+	}
+	if len(p.Notes) != 1 {
+		t.Errorf("notes = %d, want 1: %v", len(p.Notes), p.Notes)
 	}
 }
 
