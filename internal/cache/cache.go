@@ -155,13 +155,19 @@ func (s *Store) Clear() (int, error) {
 	}
 	n := 0
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+		// Entries, and temp files an interrupted write left behind (they hold
+		// an answer too).
+		if e.IsDir() || (!strings.HasSuffix(e.Name(), ".json") && !strings.HasPrefix(e.Name(), ".tmp-")) {
 			continue
 		}
 		if err := os.Remove(filepath.Join(s.Dir, e.Name())); err != nil {
 			return n, err
 		}
-		n++
+		// The count is of entries, as status counts them; a temp file is
+		// removed but not counted.
+		if strings.HasSuffix(e.Name(), ".json") {
+			n++
+		}
 	}
 	return n, nil
 }
