@@ -34,7 +34,8 @@ make e2e-credits # live, SPENDS ONE QUERY CREDIT
 
 Go 1.27.4+. **No third-party dependencies** — the standard library, plus nlink-jp
 modules written on the same rule (`github.com/nlink-jp/mcp` for the MCP
-protocol, organization ADR-030; ADR-0001).
+protocol, organization ADR-030, ADR-0001; `github.com/nlink-jp/mcptool` for the
+tool conventions, organization ADR-031, ADR-0002).
 
 ## Key conventions
 
@@ -57,8 +58,9 @@ protocol, organization ADR-030; ADR-0001).
 - **Input that is not understood is refused, never ignored.** Unknown config
   sections and keys, keys outside a section (a bare `api_key` gets directions
   to `[api]`), present-but-empty values, out-of-range numbers, a missing
-  explicit `--config`, and MCP arguments a tool does not declare
-  (`decodeArgs`, every tool, including those that take none).
+  explicit `--config`, and MCP arguments a tool does not declare (mcptool
+  refuses them before a handler runs, every tool, including those that take
+  none).
 - **Upstream drift is left out and named, never fatal — and never a value.**
   Shodan does not hold its fields to one type. Gates ask only for the
   document's shape; every projection reads through `decodeLoose` and names
@@ -93,8 +95,10 @@ protocol, organization ADR-030; ADR-0001).
   Backstops (budget.go): any other string over 1000 characters is shortened
   and named, no result leaves over 128 KB. Section content (`Text`, `Items`,
   `Summary`) is exempt by name — a path that exists to return the whole text
-  must. Thinning measures the encoding the ceiling measures (indented, after
-  the backstop). The CLI's `--json` stays complete.
+  must. Thinning and the ceiling measure what is sent (`wire`: one line, HTML
+  characters unescaped, after the backstop), and a result under the ceiling
+  is returned as the bytes measured (`mcptool.Text`). The CLI's `--json` stays
+  complete.
 - **The cached unit is the upstream body**; every view is derived from it.
   Keys are `cache.Key` (hash over length-prefixed parts; inputs never appear
   in filenames). Never cached: the quota, `not_indexed`, degraded results. A

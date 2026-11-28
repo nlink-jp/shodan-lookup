@@ -3,7 +3,9 @@
 ## Summary
 
 `shodan-lookup` is a read-only CLI + local MCP server (Go: the standard
-library, plus `github.com/nlink-jp/mcp` for the MCP protocol) that answers what an IP address exposes to the Internet, from the Shodan
+library, plus nlink-jp modules written under the same rule —
+`github.com/nlink-jp/mcp` for the MCP protocol and `github.com/nlink-jp/mcptool`
+for the tool conventions) that answers what an IP address exposes to the Internet, from the Shodan
 REST API with the operator's own API key: open ports, products and versions,
 TLS certificates, inferred CVEs, observation times. Series:
 cybersecurity-series. Module: `github.com/nlink-jp/shodan-lookup`.
@@ -51,11 +53,11 @@ internal/engine/        gate → cache → client → OUR projection; 404 cross-
 internal/config/        sectioned-TOML subset + SHODAN_LOOKUP_* (+ SHODAN_API_KEY alias); strict; base_url https-only
 internal/cache/         fixed-TTL JSON-file cache; Key = hash over length-prefixed parts; TTL 0 = off; a hit is the bytes put
 internal/termsafe/      the one list of characters a terminal obeys
-internal/mcp/           MCP tools on nlink-jp/mcp's server.ToolServer (both eras; ADR-0001); the response budget (lookup.go) and its backstops (budget.go); usage.md
+internal/mcp/           MCP tools on nlink-jp/mcptool (conventions; ADR-0002) over nlink-jp/mcp (both eras; ADR-0001); the response budget (lookup.go) and its backstops and ceiling (budget.go); usage.md
 internal/app/           dispatch; host / service / count / history / tokens / search / quota / cache / mcp; text made inert as a whole (forText)
 scripts/                codesign / notarize / brew — byte-identical copies of nlink-jp/.github/templates
 e2e/                    live tests (tags e2e, e2e_credits): the tool end to end, and the upstream traps pinned
-docs/{ja,en}/           RFP
+docs/{ja,en}/           RFP; adr/ (ADR-0001 the protocol, ADR-0002 the tool conventions)
 ```
 
 Where the budget lives: the engine returns complete views (`--json` prints
@@ -89,13 +91,24 @@ schemas and the strict argument decoding the others received in the
 
 ## Gotchas
 
-- **The MCP protocol is nlink-jp/mcp's** (ADR-0001, organization ADR-030 §6).
-  `internal/mcp` never handles `initialize` or `server/discover` itself: `Serve`
-  registers `toolDefinitions()` on a `server.ToolServer` and each handler calls
-  `callTool`. An unknown tool is the module's -32602, not a tool result. Tests
-  drive the server through the module's `client` and its three probe clients;
-  do not write the handshake by hand in a test (the e2e under `e2e/` is the
-  named stand-in for a client).
+- **The MCP protocol is nlink-jp/mcp's, the tool conventions nlink-jp/mcptool's**
+  (ADR-0001, ADR-0002; organization ADR-030 §6, ADR-031). `internal/mcp` never
+  handles `initialize` or `server/discover` itself: `Server.Build` registers
+  `toolDefinitions()` through `mcptool.Add` / `AddNoArgs`, which refuse a schema
+  that is not closed or does not name exactly the argument struct's json names,
+  and `serve.Run` serves it. An unknown tool is the module's -32602, not a tool
+  result. Tests open the server with `tooltest` (`Open`, `OpenWith`,
+  `ProbeMatrix`, `SchemaContract`); do not write the handshake by hand in a
+  test (the e2e under `e2e/` is the named stand-in for a client).
+- **An argument error is `invalid_arguments` naming the argument; the CLI keeps
+  `invalid_argument`.** mcptool refuses an undeclared, mis-cased or wrong-typed
+  argument before a handler runs, and a missing required one as
+  `missing_argument`. A handler's own check is `invalidArg(name, msg)`. The
+  engine's refusals carry `engine.Error.Argument`, and `toolError` copies it into
+  `details.argument`; a new `invalid(...)` in the engine must name its argument
+  (`internal/engine/argument_test.go`). `usage_test.go`'s `readAs` holds the one
+  code read under another name. Compare codes whole in tests:
+  `invalid_arguments` contains `invalid_argument`.
 - **`notifications/cancelled` cancels the call's ctx.** What must survive a
   cancellation runs without it: the credit read after a search uses
   `context.WithoutCancel`, or a cancelled search halts every later one.
