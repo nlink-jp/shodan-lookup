@@ -17,6 +17,8 @@
 
 ## Decision
 
+> 決定 1（`Server.Serve` を残す）と 3（`decodeArgs`・`{code,message}` の isError）は、ADR-0002 で置き換えた。サーバは `Server.Build` と mcptool の `serve.Run` で動き、引数は mcptool が読む。128 KB の上限と `capStrings` は残る。
+
 共通の方針（nlink-jp/mcp の `docs/ja/server-migration.ja.md`、v0.3.0）に従う。このリポに当てはまる項目は次のとおり。
 
 1. **外から見える形は変えない（方針 §2）。** `Server{Cfg, Cache, Eng, Version}.Serve(ctx, stdin, stdout)` を残す

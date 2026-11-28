@@ -18,6 +18,8 @@ The re-measurement of the real peers (2026-11-27, ADR-030 §7) is recorded in as
 
 ## Decision
 
+> Decisions 1 (`Server.Serve` stays) and 3 (`decodeArgs`, the `{code,message}` isError) are superseded by ADR-0002: the server runs through `Server.Build` and mcptool's `serve.Run`, and mcptool decodes the arguments. The 128 KB ceiling and `capStrings` stay.
+
 Follow the common policy (nlink-jp/mcp's `docs/en/server-migration.md`, v0.3.0), with these items for this
 repository:
 

@@ -52,7 +52,7 @@ This follows mcptool's migration policy (`docs/en/migration.md`, v0.1.3). What a
 ## Changes clients will see (from mcptool's design §5.1)
 
 - A value's JSON is one line (no indentation); the value is the same.
-- `<`, `>` and `&` arrive unescaped — a banner's or a page's `&` arrives as `&`, not `&`.
+- `<`, `>` and `&` arrive unescaped — a banner's or a page's `&` arrives as `&`, not `\u0026`.
 - An argument error's code becomes `invalid_arguments` instead of `invalid_argument`, with the name in `details.argument`. An unknown name or a wrong type is worded `unknown argument "…"` / `argument "…" must be …` instead of `arguments: json: unknown field "…"`.
 - A missing required argument is `missing_argument`. An empty string or a `0` is an argument error (`invalid_arguments`), as today.
 - With several problems in one call, the first one reported may change (unknown → missing → type).

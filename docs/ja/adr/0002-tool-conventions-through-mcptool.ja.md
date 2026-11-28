@@ -50,7 +50,7 @@ mcptool の移行の方針（`docs/ja/migration.ja.md`、v0.1.3）に従う。�
 ## 外から見える変化（mcptool の詳細設計 §5.1 から）
 
 - 値の JSON が 1 行になる（字下げをやめる）。値は同じ。
-- `<`・`>`・`&` が逃がされずに届く。たとえばバナーや HTML の `&` が `&` ではなく `&` で届く。
+- `<`・`>`・`&` が逃がされずに届く。たとえばバナーや HTML の `&` が `\u0026` ではなく `&` で届く。
 - 引数の誤りのコードが `invalid_argument` から `invalid_arguments` になり、`details.argument` に名前が入る。未知の名前と型の誤りの文言は、`arguments: json: unknown field "…"` から `unknown argument "…"`・`argument "…" must be …` になる。
 - 必須の引数が無いときのコードが `missing_argument` になる。空の文字列や `0` は、いまと同じく引数の誤り（`invalid_arguments`）である。
 - 誤りが重なった呼び出しで、最初に返す誤りが変わりうる（未知 → 必須 → 型の順）。

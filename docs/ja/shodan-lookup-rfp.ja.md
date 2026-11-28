@@ -135,7 +135,7 @@ MCP の引数と CLI のフラグの対応は、実装時に対応表を 1 つ�
   - プランと残量: `plan_restricted` / `credit_floor` / `credit_mismatch`
   - 上流と通信: `rate_limited` / `endpoint_unavailable` / `upstream_error` / `timeout` / `network_error` / `decode_error`
   - その他: `response_too_large` / `internal_error`
-- **MCP の引数は厳格にデコードする**。未宣言の引数は名前を挙げて `invalid_argument` にする。
+- **MCP の引数は厳格にデコードする**。未宣言の引数は名前を挙げて `invalid_argument` にする（MCP では、ADR-0002 で `invalid_arguments` と `details.argument` に改めた。CLI は `invalid_argument` のまま）。
   綴りを誤った `ports` が黙って無視されると、全サービスが「指定ポートの結果」に見えてしまう
 - **テキスト出力では、上流由来の文字列の制御文字を見える形にエスケープする**。
   掛けるのは出力箇所ごとではなく、レンダラーに渡す前の結果全体に 1 回である（cve-lookup の訂正 22）。

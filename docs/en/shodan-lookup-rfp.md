@@ -115,7 +115,7 @@ Every upstream-reading command except `quota` accepts `--refresh` and `--json` /
   - Plan and credits: `plan_restricted`, `credit_floor` and `credit_mismatch`.
   - Upstream and transport: `rate_limited`, `endpoint_unavailable`, `upstream_error`, `timeout`, `network_error` and `decode_error`.
   - Other: `response_too_large` and `internal_error`.
-- **MCP arguments are decoded strictly.** An undeclared argument is refused by name with `invalid_argument`. A misspelt `ports` that was silently ignored would make every service look like a filtered result.
+- **MCP arguments are decoded strictly.** An undeclared argument is refused by name with `invalid_argument` (over MCP, `invalid_arguments` with `details.argument` since ADR-0002; the CLI keeps `invalid_argument`). A misspelt `ports` that was silently ignored would make every service look like a filtered result.
 - **Text output escapes control characters in upstream strings into a visible form.** The escaping runs once over the whole result before rendering, not at each output site (cve-lookup correction 22). Banners and HTML are written by the investigated host itself, so terminal escapes must not pass through.
 
 ### Configuration
